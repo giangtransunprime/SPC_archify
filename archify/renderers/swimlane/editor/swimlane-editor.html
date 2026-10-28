@@ -1,0 +1,546 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Swimlane Editor</title>
+<style>
+:root{--bg:#f6f7f9;--panel:#fff;--line:#d5d9e0;--text:#1d2430;--muted:#667085;--accent:#2563eb;--lane:#fff;--lane2:#f8fafc;--grid:#e8ebf0}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#12161c;--panel:#1a2029;--line:#323b49;--text:#e6eaf0;--muted:#97a3b6;--accent:#6ea0ff;--lane:#171c24;--lane2:#1a2029;--grid:#262e3a}}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:13px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.app{display:grid;grid-template-rows:auto 1fr;height:100vh}
+.bar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px 12px;background:var(--panel);border-bottom:1px solid var(--line)}
+.bar .sep{width:1px;height:22px;background:var(--line);margin:0 4px}
+button,select,input,textarea{font:inherit;color:var(--text)}
+button{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:5px 10px;cursor:pointer}
+button:hover{border-color:var(--accent)}
+button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+button:disabled{opacity:.4;cursor:default}
+.main{display:grid;grid-template-columns:1fr 290px;min-height:0}
+.canvas{overflow:auto;padding:12px;min-height:0}
+.side{border-left:1px solid var(--line);background:var(--panel);padding:12px;overflow:auto}
+.side h3{margin:0 0 8px;font-size:13px}
+.side label{display:block;margin:8px 0 3px;color:var(--muted);font-size:12px}
+.side input,.side textarea,.side select{width:100%;padding:5px 7px;border:1px solid var(--line);border-radius:6px;background:var(--bg)}
+.side textarea{min-height:90px;resize:vertical}
+.row{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+.hint{color:var(--muted);font-size:12px;margin-top:12px}
+.hint b{color:var(--text)}
+svg{display:block;background:var(--bg);touch-action:none;user-select:none}
+.step{cursor:grab}.step.sel .shape{stroke:var(--accent);stroke-width:3}
+.edge{fill:none;stroke-width:1.8}.edge.sel{stroke:var(--accent)!important;stroke-width:3}
+.hit{fill:none;stroke:transparent;stroke-width:12;cursor:pointer}
+.handle{fill:var(--accent);stroke:#fff;stroke-width:2;cursor:crosshair}
+.err{color:#d92d20}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="bar">
+    <button id="bAdd" title="Thêm bước mới ngay dưới bước đang chọn">＋ Bước</button>
+    <button id="bDec" title="Thêm hình thoi quyết định">◇ Quyết định</button>
+    <button id="bLane" title="Thêm làn (nhóm đối tượng)">＋ Làn</button>
+    <label style="display:flex;gap:4px;align-items:center"><input type="checkbox" id="autoLink" checked>tự nối mũi tên từ bước đang chọn</label>
+    <span class="sep"></span>
+    <button id="bConn" title="Bấm bước nguồn rồi bước đích; hoặc kéo chấm xanh dưới bước đang chọn">➜ Nối mũi tên</button>
+    <button id="bDel">🗑 Xóa</button>
+    <span class="sep"></span>
+    <button id="bUndo">↶</button><button id="bRedo">↷</button>
+    <button id="bNum" title="Đánh số lại nhãn theo thứ tự hàng">1.2.3 Đánh số lại</button>
+    <span class="sep"></span>
+    <button id="bJson">Xuất JSON</button>
+    <button id="bSvg">Xuất SVG</button>
+    <button id="bHtml" title="Tải lại chính trình chỉnh sửa này kèm quy trình hiện tại">Lưu file làm việc</button>
+    <button id="bLoad">Mở JSON</button><input type="file" id="fLoad" accept=".json,application/json" hidden>
+    <span id="msg" class="hint" style="margin:0 0 0 auto"></span>
+  </div>
+  <div class="main">
+    <div class="canvas" id="canvas"></div>
+    <div class="side" id="side"></div>
+  </div>
+</div>
+<script id="seed" type="application/json">__SEED__</script>
+<script>
+const SRC = '<!doctype html>\n' + document.documentElement.outerHTML;
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const TONES = {frontend:['#e0f2fe','#0284c7'],backend:['#dbeafe','#2563eb'],security:['#fef3c7','#d97706'],database:['#dcfce7','#16a34a'],cloud:['#ede9fe','#7c3aed'],messagebus:['#ffe4e6','#e11d48'],external:['#f1f5f9','#64748b']};
+const TONE_LABEL = {frontend:'Xanh nhạt',backend:'Xanh dương',security:'Vàng (quyết định)',database:'Xanh lá',cloud:'Tím',messagebus:'Hồng',external:'Xám'};
+const G = {m:20,hdr:40,laneW:170,nodeW:136,minRow:112,descW:380,descGap:20,top:10};
+
+let S = JSON.parse($('seed').textContent);
+let sel = null;                 // {kind:'step'|'edge'|'lane', id|index}
+let mode = null;                // 'connect' | null
+let connectFrom = null;
+let hist = [], fut = [];
+let ctx = null;                 // layout of the last render
+let seq = 1;
+
+function norm(){
+  S.lanes ||= []; S.steps ||= []; S.edges ||= [];
+  let r = 0;
+  for (const s of S.steps){ r = s.row ?? r + 1; s.row = r; s.shape ||= 'step'; s.type ||= s.shape === 'decision' ? 'security' : 'backend'; }
+  S.steps.forEach((s) => { const m = /^s(\d+)$/.exec(s.id); if (m) seq = Math.max(seq, +m[1] + 1); });
+}
+norm();
+const snap = () => JSON.stringify(S);
+function commit(){ hist.push(histBase); if (hist.length > 100) hist.shift(); fut = []; histBase = snap(); persist(); }
+let histBase = snap();
+function undo(){ if (!hist.length) return; fut.push(snap()); S = JSON.parse(hist.pop()); histBase = snap(); sel = null; draw(); persist(); }
+function redo(){ if (!fut.length) return; hist.push(snap()); S = JSON.parse(fut.pop()); histBase = snap(); sel = null; draw(); persist(); }
+function persist(){ try { localStorage.setItem('swimlane-editor:' + (S.meta?.title || ''), snap()); } catch {} }
+function say(t, bad){ const m = $('msg'); m.textContent = t; m.className = 'hint' + (bad ? ' err' : ''); }
+
+// ---------- layout ----------
+function wrapText(text, max, maxLines){
+  const out = []; let line = '';
+  for (const w of String(text || '').split(/\s+/)){
+    if (!w) continue;
+    if ((line + ' ' + w).trim().length > max && line){ out.push(line); line = w; } else line = (line + ' ' + w).trim();
+  }
+  if (line) out.push(line);
+  if (maxLines && out.length > maxLines){ out.length = maxLines; out[maxLines - 1] = out[maxLines - 1].replace(/.{0,2}$/, '…'); }
+  return out;
+}
+function compute(){
+  const laneIdx = new Map(S.lanes.map((l, i) => [l.id, i]));
+  const rows = [...new Set(S.steps.map((s) => s.row))].sort((a, b) => a - b);
+  const rowIdx = new Map(rows.map((r, i) => [r, i]));
+  const items = S.steps.map((s) => {
+    const dec = s.shape === 'decision';
+    const lines = wrapText(s.label, dec ? 15 : 19, dec ? 3 : 4);
+    const h = dec ? Math.max(74, lines.length * 15 + 34) : Math.max(52, lines.length * 15 + 18);
+    return { s, dec, lines, w: G.nodeW, h, lane: laneIdx.get(s.lane) ?? 0, ri: rowIdx.get(s.row) };
+  });
+  const byId = new Map(items.map((i) => [i.s.id, i]));
+  const rowH = rows.map(() => G.minRow);
+  const descLines = rows.map(() => []);
+  for (const it of items){
+    rowH[it.ri] = Math.max(rowH[it.ri], it.h + 44);
+  }
+  const DW = Math.floor(G.descW / 6.3);
+  for (const it of [...items].sort((a, b) => a.lane - b.lane)){
+    const text = (it.s.description || '') + (it.s.system ? '  [' + it.s.system + ']' : '');
+    const ls = text ? wrapText(text, DW, 9) : [];
+    descLines[it.ri].push({ id: it.s.id, head: it.s.label, ls });
+  }
+  rows.forEach((_, i) => {
+    const n = descLines[i].reduce((a, d) => a + (d.ls.length ? d.ls.length + 1 : 0), 0);
+    rowH[i] = Math.max(rowH[i], n * 15 + 16);
+  });
+  const rowTop = []; let y = G.top + G.hdr + 6;
+  rows.forEach((_, i) => { rowTop.push(y); y += rowH[i]; });
+  const bodyBottom = Math.max(y, G.top + G.hdr + G.minRow + 6);
+  const L = Math.max(S.lanes.length, 1);
+  const lanesW = L * G.laneW;
+  const width = G.m + lanesW + G.descGap + G.descW + G.m;
+  const height = bodyBottom + 56;   // extra row for dropping a step on a new row
+  for (const it of items){
+    it.x = G.m + it.lane * G.laneW + (G.laneW - it.w) / 2;
+    it.y = rowTop[it.ri] + (rowH[it.ri] - it.h) / 2;
+  }
+  return { laneIdx, rows, rowIdx, items, byId, rowH, rowTop, bodyBottom, lanesW, width, height, descLines };
+}
+
+// ---------- routing ----------
+const PAD = 7;
+const anchor = (it, side) => side === 'top' ? [it.x + it.w / 2, it.y] : side === 'bottom' ? [it.x + it.w / 2, it.y + it.h] : side === 'left' ? [it.x, it.y + it.h / 2] : [it.x + it.w, it.y + it.h / 2];
+function segHit(a, b, r){
+  const x0 = Math.min(a[0], b[0]), x1 = Math.max(a[0], b[0]), y0 = Math.min(a[1], b[1]), y1 = Math.max(a[1], b[1]);
+  return x1 > r.x0 && x0 < r.x1 && y1 > r.y0 && y0 < r.y1;
+}
+function collides(pts, from, to){
+  for (const it of ctx.items){
+    if (it === from || it === to) continue;
+    const r = { x0: it.x - PAD, y0: it.y - PAD, x1: it.x + it.w + PAD, y1: it.y + it.h + PAD };
+    for (let i = 0; i < pts.length - 1; i++) if (segHit(pts[i], pts[i + 1], r)) return true;
+  }
+  return false;
+}
+function ownHit(pts, it, ends){ // route must not run through its own endpoint boxes
+  const r = { x0: it.x + 1, y0: it.y + 1, x1: it.x + it.w - 1, y1: it.y + it.h - 1 };
+  for (let i = ends === 'first' ? 1 : 0; i < pts.length - (ends === 'last' ? 2 : 1) + (ends === 'first' ? 0 : 0); i++) if (segHit(pts[i], pts[i + 1], r)) return true;
+  return false;
+}
+const plen = (p) => p.reduce((a, q, i) => i ? a + Math.abs(q[0] - p[i - 1][0]) + Math.abs(q[1] - p[i - 1][1]) : 0, 0);
+function simplify(p){
+  const o = [p[0]];
+  for (let i = 1; i < p.length; i++){
+    const q = p[i], l = o[o.length - 1];
+    if (q[0] === l[0] && q[1] === l[1]) continue;
+    if (o.length > 1){ const k = o[o.length - 2]; if ((k[0] === l[0] && l[0] === q[0]) || (k[1] === l[1] && l[1] === q[1])) o.pop(); }
+    o.push(q);
+  }
+  return o;
+}
+function overlap(p, used){
+  let n = 0;
+  for (let i = 0; i < p.length - 1; i++) for (const [u, v] of used){
+    if (p[i][0] === p[i + 1][0] && u[0] === v[0] && u[0] === p[i][0] && Math.min(Math.max(p[i][1], p[i + 1][1]), Math.max(u[1], v[1])) > Math.max(Math.min(p[i][1], p[i + 1][1]), Math.min(u[1], v[1]))) n++;
+    if (p[i][1] === p[i + 1][1] && u[1] === v[1] && u[1] === p[i][1] && Math.min(Math.max(p[i][0], p[i + 1][0]), Math.max(u[0], v[0])) > Math.max(Math.min(p[i][0], p[i + 1][0]), Math.min(u[0], v[0]))) n++;
+  }
+  return n;
+}
+function route(a, b, used){
+  const c = [];
+  const gutters = []; for (let i = 0; i <= S.lanes.length; i++) gutters.push(G.m + i * G.laneW);
+  const sides = ['top', 'bottom', 'left', 'right'];
+  for (const fs of sides) for (const ts of sides){
+    const [fx, fy] = anchor(a, fs), [tx, ty] = anchor(b, ts);
+    const out = (s, [x, y], d = 16) => s === 'top' ? [x, y - d] : s === 'bottom' ? [x, y + d] : s === 'left' ? [x - d, y] : [x + d, y];
+    const fo = out(fs, [fx, fy]), to = out(ts, [tx, ty]);
+    const base = [[fx, fy], fo, to, [tx, ty]];
+    c.push(base);
+    c.push([[fx, fy], fo, [fo[0], to[1]], to, [tx, ty]]);
+    c.push([[fx, fy], fo, [to[0], fo[1]], to, [tx, ty]]);
+    const mx = (fo[0] + to[0]) / 2, my = (fo[1] + to[1]) / 2;
+    c.push([[fx, fy], fo, [mx, fo[1]], [mx, to[1]], to, [tx, ty]]);
+    c.push([[fx, fy], fo, [fo[0], my], [to[0], my], to, [tx, ty]]);
+    for (const gx of gutters) c.push([[fx, fy], fo, [gx, fo[1]], [gx, to[1]], to, [tx, ty]]);
+    // run along the row gap above the target row
+    const gy = b.y - 18; c.push([[fx, fy], fo, [fo[0], gy], [to[0], gy], to, [tx, ty]]);
+    const gy2 = a.y + a.h + 18; c.push([[fx, fy], fo, [fo[0], gy2], [to[0], gy2], to, [tx, ty]]);
+  }
+  let best = null, bestCost = Infinity;
+  for (const raw of c){
+    const p = simplify(raw);
+    if (collides(p, a, b)) continue;
+    // endpoint segments must leave outward: first/last segment may not cross their own box
+    const first = [p[0], p[1]], last = [p[p.length - 2], p[p.length - 1]];
+    const inner = (it) => ({ x0: it.x + 1, y0: it.y + 1, x1: it.x + it.w - 1, y1: it.y + it.h - 1 });
+    if (p.length > 2 && (segHit(p[1], p[2], inner(a)) || segHit(p[p.length - 3], p[p.length - 2], inner(b)))) continue;
+    if (segHit(first[0], first[1], inner(b)) || segHit(last[0], last[1], inner(a))) continue;
+    // diagonal guard: segments must be axis aligned
+    if (p.some((q, i) => i && q[0] !== p[i - 1][0] && q[1] !== p[i - 1][1])) continue;
+    const cost = plen(p) + (p.length - 2) * 40 + overlap(p, used) * 120;
+    if (cost < bestCost){ best = p; bestCost = cost; }
+  }
+  if (best){ for (let i = 0; i < best.length - 1; i++) used.push([best[i], best[i + 1]]); return { pts: best, ok: true }; }
+  return { pts: [anchor(a, 'bottom'), anchor(b, 'top')], ok: false };
+}
+function pathD(pts, r = 8){
+  let d = `M${pts[0][0]} ${pts[0][1]}`;
+  for (let i = 1; i < pts.length - 1; i++){
+    const p = pts[i - 1], c = pts[i], n = pts[i + 1];
+    const l1 = Math.hypot(c[0] - p[0], c[1] - p[1]), l2 = Math.hypot(n[0] - c[0], n[1] - c[1]);
+    const k = Math.min(r, l1 / 2, l2 / 2);
+    const a = [c[0] - (c[0] - p[0]) / l1 * k, c[1] - (c[1] - p[1]) / l1 * k];
+    const b = [c[0] + (n[0] - c[0]) / l2 * k, c[1] + (n[1] - c[1]) / l2 * k];
+    d += ` L${a[0]} ${a[1]} Q${c[0]} ${c[1]} ${b[0]} ${b[1]}`;
+  }
+  const e = pts[pts.length - 1]; return d + ` L${e[0]} ${e[1]}`;
+}
+
+// ---------- render ----------
+function draw(){
+  ctx = compute();
+  const { items, width, height, bodyBottom, lanesW } = ctx;
+  let h = `<svg id="svg" xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" font-family="system-ui,Segoe UI,Roboto,sans-serif">`;
+  h += `<defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="context-stroke"/></marker></defs>`;
+  const stroke = 'var(--muted)';
+  S.lanes.forEach((l, i) => {
+    const x = G.m + i * G.laneW, ex = l.variant === 'exception';
+    const on = sel?.kind === 'lane' && sel.id === l.id;
+    h += `<g data-lane="${esc(l.id)}"><rect x="${x}" y="${G.top}" width="${G.laneW}" height="${bodyBottom - G.top + 40}" fill="${i % 2 ? 'var(--lane2)' : 'var(--lane)'}" stroke="${on ? 'var(--accent)' : 'var(--line)'}" stroke-width="${on ? 2.5 : 1}" ${ex ? 'stroke-dasharray="6 4"' : ''}/>`
+      + `<rect x="${x}" y="${G.top}" width="${G.laneW}" height="${G.hdr}" fill="var(--line)" opacity=".55"/>`
+      + `<text x="${x + G.laneW / 2}" y="${G.top + 25}" text-anchor="middle" font-size="13" font-weight="700" fill="var(--text)">${esc(l.label)}</text></g>`;
+  });
+  ctx.rowTop.forEach((t, i) => { h += `<line x1="${G.m}" x2="${width - G.m}" y1="${t + ctx.rowH[i]}" y2="${t + ctx.rowH[i]}" stroke="var(--grid)" stroke-dasharray="2 4"/>`; });
+  // descriptions
+  const dx = G.m + lanesW + G.descGap;
+  h += `<text x="${dx}" y="${G.top + 25}" font-size="13" font-weight="700" fill="var(--text)">${esc(S.layout?.descriptionTitle || 'Mô tả chi tiết')}</text>`;
+  ctx.descLines.forEach((list, ri) => {
+    let y = ctx.rowTop[ri] + 18;
+    for (const d of list){
+      if (!d.ls.length) continue;
+      h += `<text x="${dx}" y="${y}" font-size="12" font-weight="700" fill="var(--text)">${esc((d.head || '').match(/^\s*\d+[A-Za-z]?\.?/)?.[0] || '')}</text>`;
+      d.ls.forEach((ln, k) => { h += `<text x="${dx + 26}" y="${y + k * 15}" font-size="12" fill="var(--muted)">${esc(ln)}</text>`; });
+      y += (d.ls.length + 1) * 15;
+    }
+  });
+  // edges
+  const used = [];
+  ctx.routes = S.edges.map((e, i) => {
+    const a = ctx.byId.get(e.from), b = ctx.byId.get(e.to);
+    if (!a || !b) return null;
+    const r = route(a, b, used); r.edge = e; r.i = i; return r;
+  });
+  const lbl = [];
+  for (const r of ctx.routes){
+    if (!r) continue;
+    const e = r.edge, on = sel?.kind === 'edge' && sel.index === r.i;
+    const dashed = e.variant === 'exception' || e.variant === 'dashed';
+    const col = r.ok ? stroke : '#d92d20';
+    h += `<g data-edge="${r.i}"><path class="edge${on ? ' sel' : ''}" d="${pathD(r.pts)}" stroke="${col}" ${dashed ? 'stroke-dasharray="6 4"' : ''} marker-end="url(#ar)"/><path class="hit" d="${pathD(r.pts)}"/></g>`;
+    if (e.label) lbl.push(r);
+  }
+  for (const it of items){
+    const on = sel?.kind === 'step' && sel.id === it.s.id;
+    const [fill, line] = TONES[it.s.type] || TONES.backend;
+    let shape;
+    if (it.dec) shape = `<polygon class="shape" points="${it.x + it.w / 2},${it.y} ${it.x + it.w},${it.y + it.h / 2} ${it.x + it.w / 2},${it.y + it.h} ${it.x},${it.y + it.h / 2}" fill="${fill}" stroke="${line}" stroke-width="1.6"/>`;
+    else shape = `<rect class="shape" x="${it.x}" y="${it.y}" width="${it.w}" height="${it.h}" rx="8" fill="${fill}" stroke="${line}" stroke-width="1.6"/>`;
+    const ty = it.y + it.h / 2 - (it.lines.length - 1) * 7.5 + 4;
+    h += `<g class="step${on ? ' sel' : ''}" data-step="${esc(it.s.id)}">${shape}`
+      + it.lines.map((ln, k) => `<text x="${it.x + it.w / 2}" y="${ty + k * 15}" text-anchor="middle" font-size="12" font-weight="600" fill="#1d2430">${esc(ln)}</text>`).join('')
+      + (it.s.tag ? `<text x="${it.x + it.w - 6}" y="${it.y - 4}" text-anchor="end" font-size="10" fill="var(--muted)">${esc(it.s.tag)}</text>` : '')
+      + `</g>`;
+  }
+  const placed = [];
+  const hitsR = (a, b) => a.x1 > b.x0 && a.x0 < b.x1 && a.y1 > b.y0 && a.y0 < b.y1;
+  for (const r of lbl){
+    const w = r.edge.label.length * 6 + 10, cands = [];
+    for (let i = 0; i < r.pts.length - 1; i++){
+      const [p, q] = [r.pts[i], r.pts[i + 1]], l = Math.abs(q[0] - p[0]) + Math.abs(q[1] - p[1]);
+      for (const t of [.5, .3, .7, .15, .85]) cands.push({ l: l * (t === .5 ? 1 : .9), x: p[0] + (q[0] - p[0]) * t, y: p[1] + (q[1] - p[1]) * t });
+    }
+    cands.sort((u, v) => v.l - u.l);
+    let pick = cands[0];
+    for (const c of cands){
+      const box = { x0: c.x - w / 2 - 2, x1: c.x + w / 2 + 2, y0: c.y - 11, y1: c.y + 9 };
+      if (placed.some((o) => hitsR(box, o)) || items.some((it) => hitsR(box, { x0: it.x, x1: it.x + it.w, y0: it.y, y1: it.y + it.h }))) continue;
+      pick = c; break;
+    }
+    placed.push({ x0: pick.x - w / 2 - 2, x1: pick.x + w / 2 + 2, y0: pick.y - 11, y1: pick.y + 9 });
+    h += `<g data-edge="${r.i}" pointer-events="none"><rect x="${pick.x - w / 2}" y="${pick.y - 9}" width="${w}" height="16" rx="4" fill="var(--bg)" stroke="var(--line)"/><text x="${pick.x}" y="${pick.y + 3}" text-anchor="middle" font-size="10" fill="var(--text)">${esc(r.edge.label)}</text></g>`;
+  }
+  if (sel?.kind === 'step'){
+    const it = ctx.byId.get(sel.id);
+    if (it) h += `<circle class="handle" data-handle="${esc(it.s.id)}" cx="${it.x + it.w / 2}" cy="${it.y + it.h + (it.dec ? 0 : 0) + 0}" r="6"><title>Kéo sang bước khác để nối mũi tên</title></circle>`;
+  }
+  h += `<g id="overlay"></g></svg>`;
+  $('canvas').innerHTML = h;
+  panel();
+  $('bConn').classList.toggle('on', mode === 'connect');
+  $('bUndo').disabled = !hist.length; $('bRedo').disabled = !fut.length;
+}
+
+// ---------- side panel ----------
+function panel(){
+  const p = $('side');
+  const hint = `<div class="hint"><b>Kéo</b> bước sang ô khác (giữ <b>Shift</b> để chèn hàng mới). <b>Kéo chấm xanh</b> dưới bước để nối mũi tên. <b>Nhấp đúp</b> để đổi tên nhanh. <b>Delete</b> xóa phần đang chọn.</div>`;
+  if (sel?.kind === 'step'){
+    const s = S.steps.find((x) => x.id === sel.id); if (!s) return;
+    p.innerHTML = `<h3>Bước ${esc(s.id)}</h3>
+      <label>Nhãn (ví dụ "3. Kiểm tra tồn")</label><input data-f="label" value="${esc(s.label)}">
+      <label>Mô tả chi tiết</label><textarea data-f="description">${esc(s.description || '')}</textarea>
+      <label>Hệ thống / chứng từ</label><input data-f="system" value="${esc(s.system || '')}">
+      <label>Ghi chú nhỏ phía trên (tag)</label><input data-f="tag" value="${esc(s.tag || '')}">
+      <label>Hình dạng</label><select data-f="shape"><option value="step"${s.shape === 'step' ? ' selected' : ''}>Bước (chữ nhật)</option><option value="decision"${s.shape === 'decision' ? ' selected' : ''}>Quyết định (hình thoi)</option></select>
+      <label>Màu</label><select data-f="type">${Object.keys(TONES).map((t) => `<option value="${t}"${s.type === t ? ' selected' : ''}>${TONE_LABEL[t]}</option>`).join('')}</select>
+      <label>Làn</label><select data-f="lane">${S.lanes.map((l) => `<option value="${esc(l.id)}"${s.lane === l.id ? ' selected' : ''}>${esc(l.label)}</option>`).join('')}</select>
+      <div class="row"><button id="pDup">Nhân đôi</button><button id="pDel">Xóa bước</button></div>${hint}`;
+    p.querySelectorAll('[data-f]').forEach((el) => {
+      el.addEventListener('input', () => { s[el.dataset.f] = el.value; if (el.dataset.f === 'shape' && !el.dataset.t) {} draw2(); });
+      el.addEventListener('change', () => {
+        if (el.dataset.f === 'lane' && S.steps.some((o) => o !== s && o.lane === s.lane && o.row === s.row)) { say('Ô đó đã có bước khác', true); undo(); return; }
+        commit(); draw();
+      });
+    });
+    $('pDel').onclick = delSel;
+    $('pDup').onclick = () => { const n = { ...s, id: nid(), row: s.row + 0.5, label: s.label + ' (bản sao)' }; S.steps.push(n); norm2(); sel = { kind: 'step', id: n.id }; commit(); draw(); };
+  } else if (sel?.kind === 'edge'){
+    const e = S.edges[sel.index]; if (!e) return;
+    p.innerHTML = `<h3>Mũi tên ${esc(e.from)} → ${esc(e.to)}</h3>
+      <label>Nhãn (ví dụ "Có", "Không")</label><input data-f="label" value="${esc(e.label || '')}">
+      <label>Kiểu nét</label><select data-f="variant"><option value=""${!e.variant ? ' selected' : ''}>Liền</option><option value="exception"${e.variant === 'exception' ? ' selected' : ''}>Đứt nét (ngoại lệ)</option></select>
+      <div class="row"><button id="pRev">Đảo chiều</button><button id="pDel">Xóa mũi tên</button></div>${hint}`;
+    p.querySelectorAll('[data-f]').forEach((el) => {
+      el.addEventListener('input', () => { if (el.value) e[el.dataset.f] = el.value; else delete e[el.dataset.f]; draw2(); });
+      el.addEventListener('change', () => { commit(); draw(); });
+    });
+    $('pDel').onclick = delSel;
+    $('pRev').onclick = () => { [e.from, e.to] = [e.to, e.from]; commit(); draw(); };
+  } else if (sel?.kind === 'lane'){
+    const i = S.lanes.findIndex((l) => l.id === sel.id), l = S.lanes[i]; if (!l) return;
+    p.innerHTML = `<h3>Làn "${esc(l.label)}"</h3>
+      <label>Tên làn</label><input data-f="label" value="${esc(l.label)}">
+      <label>Kiểu</label><select data-f="variant"><option value=""${!l.variant ? ' selected' : ''}>Thường</option><option value="exception"${l.variant === 'exception' ? ' selected' : ''}>Ngoại lệ (viền đứt)</option></select>
+      <div class="row"><button id="lL">← Sang trái</button><button id="lR">Sang phải →</button><button id="pDel">Xóa làn</button></div>${hint}`;
+    p.querySelectorAll('[data-f]').forEach((el) => {
+      el.addEventListener('input', () => { if (el.value) l[el.dataset.f] = el.value; else delete l[el.dataset.f]; draw2(); });
+      el.addEventListener('change', () => { commit(); draw(); });
+    });
+    const mv = (d) => { const j = i + d; if (j < 0 || j >= S.lanes.length) return; [S.lanes[i], S.lanes[j]] = [S.lanes[j], S.lanes[i]]; commit(); draw(); };
+    $('lL').onclick = () => mv(-1); $('lR').onclick = () => mv(1); $('pDel').onclick = delSel;
+  } else {
+    p.innerHTML = `<h3>${esc(S.meta?.title || 'Quy trình')}</h3>
+      <label>Tiêu đề quy trình</label><input id="mTitle" value="${esc(S.meta?.title || '')}">
+      <label>Tiêu đề cột mô tả</label><input id="mDesc" value="${esc(S.layout?.descriptionTitle || 'Mô tả chi tiết')}">
+      <div class="hint">Chọn một bước, mũi tên hoặc tên làn để sửa chi tiết ở đây.</div>${hint}`;
+    $('mTitle').onchange = (ev) => { (S.meta ||= {}).title = ev.target.value; commit(); };
+    $('mDesc').onchange = (ev) => { (S.layout ||= {}).descriptionTitle = ev.target.value; commit(); draw(); };
+  }
+}
+let t2 = null;
+function draw2(){ // redraw the canvas while typing, keep the side panel (and its focus) intact
+  const keep = $('side').innerHTML; const act = document.activeElement; const id = act?.dataset?.f; const pos = act?.selectionStart;
+  draw();
+  if (id){ const el = $('side').querySelector(`[data-f="${id}"]`); if (el){ el.focus(); try { el.setSelectionRange(pos, pos); } catch {} } }
+  void keep;
+}
+
+// ---------- model ops ----------
+const nid = () => { let id; do id = 's' + (seq++); while (S.steps.some((s) => s.id === id)); return id; };
+function norm2(){ // renumber rows to 1..n, keeping order, fractional rows (duplicates) slot in between
+  const rows = [...new Set(S.steps.map((s) => s.row))].sort((a, b) => a - b);
+  const m = new Map(rows.map((r, i) => [r, i + 1])); S.steps.forEach((s) => { s.row = m.get(s.row); });
+}
+function addStep(shape){
+  if (!S.lanes.length){ say('Thêm làn trước', true); return; }
+  const from = sel?.kind === 'step' ? S.steps.find((s) => s.id === sel.id) : null;
+  let lane = from?.lane || (sel?.kind === 'lane' ? sel.id : S.lanes[0].id), row;
+  if (from){ row = from.row + 1; S.steps.forEach((s) => { if (s.row >= row) s.row += 1; }); }
+  else row = Math.max(0, ...S.steps.map((s) => s.row)) + 1;
+  const n = { id: nid(), lane, row, shape, type: shape === 'decision' ? 'security' : 'backend', label: shape === 'decision' ? 'Điều kiện?' : 'Bước mới', description: '' };
+  S.steps.push(n);
+  if (from && $('autoLink').checked) S.edges.push({ from: from.id, to: n.id });
+  sel = { kind: 'step', id: n.id }; commit(); draw();
+  const f = $('side').querySelector('[data-f=label]'); f?.focus(); f?.select();
+}
+function addLane(){
+  const name = prompt('Tên làn mới (nhóm đối tượng):', 'Bộ phận mới'); if (!name) return;
+  let id = 'l' + (S.lanes.length + 1); while (S.lanes.some((l) => l.id === id)) id += 'x';
+  S.lanes.push({ id, label: name }); sel = { kind: 'lane', id }; commit(); draw();
+}
+function delSel(){
+  if (!sel) return;
+  if (sel.kind === 'step'){ S.steps = S.steps.filter((s) => s.id !== sel.id); S.edges = S.edges.filter((e) => e.from !== sel.id && e.to !== sel.id); norm2(); }
+  else if (sel.kind === 'edge') S.edges.splice(sel.index, 1);
+  else if (sel.kind === 'lane'){ if (S.steps.some((s) => s.lane === sel.id)){ say('Làn còn bước, hãy chuyển hoặc xóa các bước trước', true); return; } S.lanes = S.lanes.filter((l) => l.id !== sel.id); }
+  sel = null; commit(); draw();
+}
+function addEdge(a, b){
+  if (a === b) return;
+  if (S.edges.some((e) => e.from === a && e.to === b)){ say('Mũi tên này đã có', true); return; }
+  S.edges.push({ from: a, to: b }); sel = { kind: 'edge', index: S.edges.length - 1 }; commit(); draw();
+}
+function renumber(){
+  const order = [...S.steps].sort((a, b) => a.row - b.row || S.lanes.findIndex((l) => l.id === a.lane) - S.lanes.findIndex((l) => l.id === b.lane));
+  order.forEach((s, i) => { s.label = (i + 1) + '. ' + String(s.label).replace(/^\s*\d+[A-Za-z]?\.?\s*/, ''); });
+  commit(); draw(); say('Đã đánh số lại ' + order.length + ' bước');
+}
+
+// ---------- pointer interaction ----------
+let drag = null;
+const svgPt = (ev) => { const r = $('svg').getBoundingClientRect(); return [ev.clientX - r.left, ev.clientY - r.top]; };
+$('canvas').addEventListener('pointerdown', (ev) => {
+  const hd = ev.target.closest('[data-handle]');
+  const st = ev.target.closest('[data-step]');
+  const ed = ev.target.closest('[data-edge]');
+  const ln = ev.target.closest('[data-lane]');
+  if (hd){ drag = { kind: 'connect', from: hd.dataset.handle }; $('canvas').setPointerCapture(ev.pointerId); ev.preventDefault(); return; }
+  if (st){
+    const id = st.dataset.step;
+    if (mode === 'connect'){
+      if (!connectFrom){ connectFrom = id; sel = { kind: 'step', id }; say('Bấm bước đích'); draw(); }
+      else { const a = connectFrom; connectFrom = null; addEdge(a, id); }
+      return;
+    }
+    sel = { kind: 'step', id }; const [x, y] = svgPt(ev);
+    drag = { kind: 'move', id, x0: x, y0: y, moved: false }; $('canvas').setPointerCapture(ev.pointerId); draw(); return;
+  }
+  if (ed){ sel = { kind: 'edge', index: +ed.dataset.edge }; draw(); return; }
+  if (ln){ sel = { kind: 'lane', id: ln.dataset.lane }; draw(); return; }
+  sel = null; connectFrom = null; draw();
+});
+$('canvas').addEventListener('pointermove', (ev) => {
+  if (!drag) return;
+  const [x, y] = svgPt(ev), ov = $('overlay');
+  if (drag.kind === 'move'){
+    if (!drag.moved && Math.hypot(x - drag.x0, y - drag.y0) < 5) return;
+    drag.moved = true;
+    const it = ctx.byId.get(drag.id), cell = cellAt(x, y);
+    const gx = G.m + cell.lane * G.laneW + (G.laneW - it.w) / 2;
+    const gy = cell.rowY;
+    ov.innerHTML = `<rect x="${gx}" y="${gy}" width="${it.w}" height="${it.h}" rx="8" fill="var(--accent)" opacity=".18" stroke="var(--accent)" stroke-dasharray="5 3"/>`
+      + (ev.shiftKey ? `<line x1="${G.m}" x2="${G.m + ctx.lanesW}" y1="${cell.insertY}" y2="${cell.insertY}" stroke="var(--accent)" stroke-width="3"/>` : '')
+      + `<rect x="${x - it.w / 2}" y="${y - it.h / 2}" width="${it.w}" height="${it.h}" rx="8" fill="var(--accent)" opacity=".35"/>`;
+  } else {
+    const a = ctx.byId.get(drag.from), [ax, ay] = anchor(a, 'bottom');
+    ov.innerHTML = `<line x1="${ax}" y1="${ay}" x2="${x}" y2="${y}" stroke="var(--accent)" stroke-width="2" stroke-dasharray="5 3" marker-end="url(#ar)"/>`;
+  }
+});
+function cellAt(x, y){
+  const lane = Math.min(Math.max(Math.floor((x - G.m) / G.laneW), 0), Math.max(S.lanes.length - 1, 0));
+  let ri = ctx.rows.length, rowY = ctx.bodyBottom + 6, insertY = ctx.bodyBottom;
+  for (let i = 0; i < ctx.rows.length; i++){ if (y < ctx.rowTop[i] + ctx.rowH[i]){ ri = i; rowY = ctx.rowTop[i] + (ctx.rowH[i] - (ctx.byId.get(drag.id)?.h || 52)) / 2; insertY = ctx.rowTop[i]; break; } }
+  return { lane, ri, rowY, insertY };
+}
+$('canvas').addEventListener('pointerup', (ev) => {
+  if (!drag) return;
+  const d = drag; drag = null;
+  const [x, y] = svgPt(ev);
+  if (d.kind === 'connect'){
+    const tgt = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('[data-step]');
+    $('overlay').innerHTML = '';
+    if (tgt && tgt.dataset.step !== d.from) addEdge(d.from, tgt.dataset.step); else say('Thả lên một bước khác để nối');
+    return;
+  }
+  if (!d.moved) return;
+  drag = d; const cell = cellAt(x, y); drag = null;
+  const s = S.steps.find((q) => q.id === d.id), lane = S.lanes[cell.lane].id;
+  let row;
+  if (ev.shiftKey && cell.ri < ctx.rows.length){ row = ctx.rows[cell.ri]; S.steps.forEach((q) => { if (q.row >= row) q.row += 1; }); }
+  else if (cell.ri >= ctx.rows.length) row = Math.max(...ctx.rows, 0) + 1;
+  else row = ctx.rows[cell.ri];
+  const other = S.steps.find((q) => q !== s && q.lane === lane && q.row === row);
+  if (other){ other.lane = s.lane; other.row = s.row; }   // swap places with the step that holds the cell
+  s.lane = lane; s.row = row; norm2(); commit(); draw();
+  if (other) say('Đã đổi chỗ với bước "' + other.label + '"');
+});
+$('canvas').addEventListener('dblclick', (ev) => {
+  const st = ev.target.closest('[data-step]'), ln = ev.target.closest('[data-lane]'), ed = ev.target.closest('[data-edge]');
+  if (st){ const s = S.steps.find((q) => q.id === st.dataset.step); const v = prompt('Nhãn bước:', s.label); if (v != null){ s.label = v; commit(); draw(); } }
+  else if (ed){ const e = S.edges[+ed.dataset.edge]; const v = prompt('Nhãn mũi tên (để trống = không nhãn):', e.label || ''); if (v != null){ if (v) e.label = v; else delete e.label; commit(); draw(); } }
+  else if (ln){ const l = S.lanes.find((q) => q.id === ln.dataset.lane); const v = prompt('Tên làn:', l.label); if (v){ l.label = v; commit(); draw(); } }
+});
+document.addEventListener('keydown', (ev) => {
+  if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '')) return;
+  if (ev.key === 'Delete' || ev.key === 'Backspace'){ ev.preventDefault(); delSel(); }
+  else if ((ev.ctrlKey || ev.metaKey) && ev.key === 'z'){ ev.preventDefault(); ev.shiftKey ? redo() : undo(); }
+  else if ((ev.ctrlKey || ev.metaKey) && ev.key === 'y'){ ev.preventDefault(); redo(); }
+  else if (ev.key === 'Escape'){ mode = null; connectFrom = null; sel = null; draw(); }
+});
+
+// ---------- toolbar / export ----------
+$('bAdd').onclick = () => addStep('step');
+$('bDec').onclick = () => addStep('decision');
+$('bLane').onclick = addLane;
+$('bConn').onclick = () => { mode = mode ? null : 'connect'; connectFrom = null; say(mode ? 'Bấm bước nguồn rồi bước đích (Esc để thoát)' : ''); draw(); };
+$('bDel').onclick = delSel; $('bUndo').onclick = undo; $('bRedo').onclick = redo; $('bNum').onclick = renumber;
+function out(){
+  const o = { ...S, schema_version: 1, diagram_type: 'swimlane' };
+  const order = (a, b) => a.row - b.row || S.lanes.findIndex((l) => l.id === a.lane) - S.lanes.findIndex((l) => l.id === b.lane);
+  o.steps = [...S.steps].sort(order).map((s) => { const c = { ...s }; for (const k of Object.keys(c)) if (c[k] === '' || c[k] == null) delete c[k]; if (c.shape === 'step') delete c.shape; return c; });
+  o.edges = S.edges.map((e) => { const c = { ...e }; for (const k of Object.keys(c)) if (c[k] === '' || c[k] == null) delete c[k]; return c; });
+  return o;
+}
+function save(name, text, type){ const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); }
+const fname = () => ((S.meta?.title || 'quy-trinh').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'quy-trinh');
+$('bJson').onclick = () => { save(fname() + '.swimlane.json', JSON.stringify(out(), null, 2), 'application/json'); say('Đã xuất JSON, dùng được với archify finalize swimlane'); };
+$('bSvg').onclick = () => {
+  const keep = sel; sel = null; draw();
+  const css = getComputedStyle(document.documentElement); const vars = ['--bg','--lane','--lane2','--line','--grid','--text','--muted','--accent'];
+  let svg = $('svg').outerHTML; vars.forEach((v) => { svg = svg.split(`var(${v})`).join(css.getPropertyValue(v).trim()); });
+  save(fname() + '.svg', svg, 'image/svg+xml'); sel = keep; draw();
+};
+$('bHtml').onclick = () => {
+  const json = JSON.stringify(out()).replace(/</g, '\\u003c');
+  const html = SRC.replace(/(<script id="seed" type="application\/json">)[\s\S]*?(<\/script>)/, (_, a, b) => a + json + b);
+  save(fname() + '.editor.html', html, 'text/html'); say('Đã lưu file làm việc, mở lại để sửa tiếp');
+};
+$('bLoad').onclick = () => $('fLoad').click();
+$('fLoad').onchange = async (ev) => {
+  const f = ev.target.files[0]; if (!f) return;
+  try { const j = JSON.parse(await f.text()); if (j.diagram_type !== 'swimlane') throw new Error('Không phải file swimlane'); S = j; norm(); sel = null; commit(); draw(); say('Đã mở ' + f.name); }
+  catch (e) { say('Không mở được: ' + e.message, true); }
+};
+
+try { const saved = localStorage.getItem('swimlane-editor:' + (S.meta?.title || '')); void saved; } catch {}
+window.__editor = { get S(){ return S; }, out, draw, addStep, addEdge };
+draw();
+</script>
+</body>
+</html>

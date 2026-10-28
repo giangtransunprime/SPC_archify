@@ -52,3 +52,20 @@ other routes.
 | `swimlane/self-edge` | an edge from a step to itself |
 | `swimlane/route-blocked` | no route avoids crossing a step |
 | `swimlane/route-unsupported` | `route`, `fromSide` or `toSide` that no candidate route offers |
+
+## Visual editor
+
+`editor/swimlane-editor.html` is a single-file, offline editor for the same JSON
+(`__SEED__` in the file is replaced with the diagram). Open it in a browser to:
+
+- drag a step to another lane or row (Shift inserts a new row; a occupied cell swaps);
+- add steps and decision diamonds below the selected step, optionally auto-linked;
+- drag the blue handle under a step onto another step to draw an arrow, or use the
+  link mode button; double-click edits labels;
+- edit description, system, tag, shape, colour and lane in the side panel, add,
+  rename, reorder and delete lanes;
+- undo/redo, renumber labels, export JSON, SVG, or a working copy of the editor
+  that opens with the current process.
+
+Export the JSON and run `archify finalize swimlane` for the checked showcase HTML.
+The editor's own routing is a lightweight preview and may stack parallel lines.
