@@ -138,6 +138,7 @@ const EVIDENCE_NODE_COLLECTIONS = {
   class: 'types',
   timeline: 'events',
   waterfall: 'spans',
+  swimlane: 'steps',
 };
 
 function evidenceNodes(diagramType, diagram) {

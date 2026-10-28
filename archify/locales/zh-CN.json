@@ -484,5 +484,14 @@
   "legend.waterfall.ok": "已完成",
   "legend.waterfall.error": "出错",
   "legend.waterfall.cancelled": "已取消",
-  "legend.waterfall.incomplete": "未完成（无结束记录）"
+  "legend.waterfall.incomplete": "未完成（无结束记录）",
+  "diagram.description.swimlane": "由 Archify 生成的纵向泳道流程图。",
+  "swimlane.description": "说明",
+  "legend.swimlane.frontend": "人员或界面",
+  "legend.swimlane.backend": "系统步骤",
+  "legend.swimlane.security": "决策或控制",
+  "legend.swimlane.database": "记录或台账",
+  "legend.swimlane.cloud": "云服务",
+  "legend.swimlane.messagebus": "消息或交接",
+  "legend.swimlane.external": "外部方"
 }

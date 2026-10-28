@@ -479,6 +479,24 @@ the median gap and 10% of the span is drawn as a fixed-width break labelled
 with the omitted duration; `layout.breaks: "none"` keeps one proportional axis.
 See [`../renderers/timeline/README.md`](../renderers/timeline/README.md).
 
+### Swimlane
+
+A swimlane reads a procedure top to bottom: each `lanes[]` entry is a vertical
+column for one role, each `steps[]` entry is a numbered step placed in its lane,
+and the row order is the order of `steps[]` (set `row` on two steps to place them
+side by side). `shape: "decision"` draws a diamond. Give every step a
+`description` (and an optional `system` for the form or system used); the
+description column sits to the right and aligns with the step's row. Use a lane
+with `variant: "exception"` for returns, rework or failure paths.
+
+Edges are routed automatically with orthogonal routes that never cross a
+step. If no route is clear the renderer reports `swimlane/route-blocked`: move the
+step to another lane or row, or pin `route` (`side-first`, `down-first`) or
+`fromSide`/`toSide`. Keep step labels short (they wrap in the lane width) and put
+detail in the description. Lane and description widths are `layout.laneWidth`
+and `layout.descriptionWidth`; `layout.descriptionTitle` renames the column. See
+[`../renderers/swimlane/README.md`](../renderers/swimlane/README.md).
+
 ### Waterfall
 
 A waterfall answers "where did the time go?" for one request, job, or agent

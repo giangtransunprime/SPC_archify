@@ -484,5 +484,14 @@
   "legend.waterfall.ok": "مكتمل",
   "legend.waterfall.error": "خطأ",
   "legend.waterfall.cancelled": "ملغى",
-  "legend.waterfall.incomplete": "غير مكتمل (بلا نهاية مسجَّلة)"
+  "legend.waterfall.incomplete": "غير مكتمل (بلا نهاية مسجَّلة)",
+  "diagram.description.swimlane": "مخطط انسيابي بمسارات عمودية أنشأه Archify.",
+  "swimlane.description": "الوصف",
+  "legend.swimlane.frontend": "شخص أو شاشة",
+  "legend.swimlane.backend": "خطوة نظام",
+  "legend.swimlane.security": "قرار أو رقابة",
+  "legend.swimlane.database": "سجل أو دفتر",
+  "legend.swimlane.cloud": "خدمة سحابية",
+  "legend.swimlane.messagebus": "رسالة أو تسليم",
+  "legend.swimlane.external": "طرف خارجي"
 }

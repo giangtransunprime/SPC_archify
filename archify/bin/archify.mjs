@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const skillRoot = path.resolve(__dirname, '..');
 
-const TYPES = new Set(['architecture', 'workflow', 'sequence', 'dataflow', 'lifecycle', 'erd', 'tree', 'class', 'timeline', 'waterfall', 'explainer']);
+const TYPES = new Set(['architecture', 'workflow', 'sequence', 'dataflow', 'lifecycle', 'erd', 'tree', 'class', 'timeline', 'waterfall', 'swimlane', 'explainer']);
 const DELIVERY_SIDECAR_SUFFIXES = Object.freeze([
   '.delivery.json',
   '.delivery-pending.json',
@@ -2217,7 +2217,7 @@ ${commands.join('\n')}
   (finalize --out-dir relocates browser-check and default finalize receipts; HTML and its delivery receipt stay at the requested output path)
 
 Types:
-  architecture, workflow, sequence, dataflow, lifecycle, erd, tree, class, timeline, waterfall, explainer
+  architecture, workflow, sequence, dataflow, lifecycle, erd, tree, class, timeline, waterfall, swimlane, explainer
 
 Explainer writing checks (validate, deliver, finalize, patch):
   --writing warn|strict|off (default: warn)
@@ -6148,6 +6148,7 @@ async function commandDoctor(args) {
     class: 'payments.class.json',
     timeline: 'payment-incident.timeline.json',
     waterfall: 'checkout-request.waterfall.json',
+    swimlane: 'order-fulfilment.swimlane.json',
     explainer: 'delivery.explainer.json',
   };
 

@@ -484,5 +484,14 @@
   "legend.waterfall.ok": "완료",
   "legend.waterfall.error": "오류",
   "legend.waterfall.cancelled": "취소됨",
-  "legend.waterfall.incomplete": "미완료 (종료 기록 없음)"
+  "legend.waterfall.incomplete": "미완료 (종료 기록 없음)",
+  "diagram.description.swimlane": "Archify가 생성한 세로 스윔레인 순서도입니다.",
+  "swimlane.description": "설명",
+  "legend.swimlane.frontend": "담당자 또는 화면",
+  "legend.swimlane.backend": "시스템 단계",
+  "legend.swimlane.security": "결정 또는 통제",
+  "legend.swimlane.database": "기록 또는 원장",
+  "legend.swimlane.cloud": "클라우드 서비스",
+  "legend.swimlane.messagebus": "메시지 또는 인계",
+  "legend.swimlane.external": "외부 당사자"
 }

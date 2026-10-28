@@ -484,5 +484,14 @@
   "legend.waterfall.ok": "Completado",
   "legend.waterfall.error": "Error",
   "legend.waterfall.cancelled": "Cancelado",
-  "legend.waterfall.incomplete": "Incompleto (sin fin registrado)"
+  "legend.waterfall.incomplete": "Incompleto (sin fin registrado)",
+  "diagram.description.swimlane": "Un diagrama de flujo de calles verticales generado por Archify.",
+  "swimlane.description": "Descripción",
+  "legend.swimlane.frontend": "Persona o pantalla",
+  "legend.swimlane.backend": "Paso del sistema",
+  "legend.swimlane.security": "Decisión o control",
+  "legend.swimlane.database": "Registro o libro",
+  "legend.swimlane.cloud": "Servicio en la nube",
+  "legend.swimlane.messagebus": "Mensaje o traspaso",
+  "legend.swimlane.external": "Parte externa"
 }
