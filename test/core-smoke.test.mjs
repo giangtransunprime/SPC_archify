@@ -21,6 +21,7 @@ const examples = [
   ['class', 'payments.class.json', 'types'],
   ['timeline', 'payment-incident.timeline.json', 'events'],
   ['waterfall', 'checkout-request.waterfall.json', 'spans'],
+  ['swimlane', 'order-fulfilment.swimlane.json', 'steps'],
   ['explainer', 'delivery.explainer.json', 'panels'],
 ];
 

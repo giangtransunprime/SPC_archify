@@ -111,7 +111,7 @@ export async function loadDiagramWithBrandMarks(options) {
   return loaded;
 }
 
-const START_TYPES = new Set(['architecture', 'workflow', 'sequence', 'dataflow', 'lifecycle', 'erd', 'tree', 'class', 'timeline', 'waterfall']);
+const START_TYPES = new Set(['architecture', 'workflow', 'sequence', 'dataflow', 'lifecycle', 'erd', 'tree', 'class', 'timeline', 'waterfall', 'swimlane']);
 
 function isFilesystemError(error) {
   return typeof error?.code === 'string'
@@ -313,6 +313,7 @@ const SEMANTIC_COLLECTIONS = {
   class: 'types',
   timeline: 'events',
   waterfall: 'spans',
+  swimlane: 'steps',
 };
 
 const RELATIONSHIP_COLLECTIONS = {
@@ -323,6 +324,7 @@ const RELATIONSHIP_COLLECTIONS = {
   lifecycle: 'transitions',
   erd: 'relationships',
   class: 'relationships',
+  swimlane: 'edges',
 };
 
 // Relationship IDs are optional for backwards compatibility, but once an

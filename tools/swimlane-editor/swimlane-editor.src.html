@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Swimlane Editor</title>
+<style>
+:root{--bg:#f6f7f9;--panel:#fff;--line:#d5d9e0;--text:#1d2430;--muted:#667085;--accent:#2563eb}
+@media (prefers-color-scheme:dark){:root{--bg:#12161c;--panel:#1a2029;--line:#323b49;--text:#e6eaf0;--muted:#97a3b6;--accent:#6ea0ff}}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:13px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.app{display:grid;grid-template-rows:auto 1fr;height:100vh}
+.bar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px 12px;background:var(--panel);border-bottom:1px solid var(--line)}
+.bar .sep{width:1px;height:22px;background:var(--line);margin:0 4px}
+button,select,input,textarea{font:inherit;color:var(--text)}
+button{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:5px 10px;cursor:pointer}
+button:hover{border-color:var(--accent)}
+button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+button:disabled{opacity:.4;cursor:default}
+.main{display:grid;grid-template-columns:1fr 290px;min-height:0}
+.stage{position:relative;min-height:0;background:#0b0f14}
+.stage iframe{width:100%;height:100%;border:0;display:block;background:#fff}
+.side{border-left:1px solid var(--line);background:var(--panel);padding:12px;overflow:auto}
+.side h3{margin:0 0 8px;font-size:13px}
+.side label{display:block;margin:8px 0 3px;color:var(--muted);font-size:12px}
+.side input,.side textarea,.side select{width:100%;padding:5px 7px;border:1px solid var(--line);border-radius:6px;background:var(--bg)}
+.side textarea{min-height:90px;resize:vertical}
+.row{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+.hint{color:var(--muted);font-size:12px;margin-top:12px}.hint b{color:var(--text)}
+.err{color:#d92d20}
+.descbox{position:absolute;z-index:5;font:13px/1.4 system-ui,sans-serif;padding:4px 6px;border:2px solid var(--accent);border-radius:6px;background:var(--panel);color:var(--text);resize:none}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="bar">
+    <button id="bMode" title="Chuyển giữa sửa và xem như bản archify (thu phóng, tìm, lọc...)">Đang: Chỉnh sửa</button>
+    <span class="sep"></span>
+    <button id="bAdd" title="Thêm bước mới ngay dưới bước đang chọn">＋ Bước</button>
+    <button id="bDec" title="Thêm hình thoi quyết định">◇ Quyết định</button>
+    <button id="bLane" title="Thêm làn (nhóm đối tượng)">＋ Làn</button>
+    <label style="display:flex;gap:4px;align-items:center"><input type="checkbox" id="autoLink" checked>tự nối từ bước đang chọn</label>
+    <span class="sep"></span>
+    <button id="bConn" title="Bấm bước nguồn rồi bước đích; hoặc kéo chấm xanh quanh bước đang chọn">➜ Nối mũi tên</button>
+    <button id="bDel">🗑 Xóa</button>
+    <span class="sep"></span>
+    <button id="bUndo">↶</button><button id="bRedo">↷</button>
+    <button id="bNum" title="Đánh số lại nhãn theo thứ tự hàng">1.2.3 Đánh số lại</button>
+    <span class="sep"></span>
+    <button id="bJson">Xuất JSON</button>
+    <button id="bPage" title="Tải trang archify đang xem, dùng được độc lập">Xuất HTML archify</button>
+    <button id="bHtml" title="Tải lại chính trình chỉnh sửa này kèm quy trình hiện tại">Lưu file làm việc</button>
+    <button id="bLoad">Mở JSON</button><input type="file" id="fLoad" accept=".json,application/json" hidden>
+    <span id="msg" class="hint" style="margin:0 0 0 auto"></span>
+  </div>
+  <div class="main">
+    <div class="stage" id="stage"><iframe id="pv" title="Xem trước archify"></iframe></div>
+    <div class="side" id="side"></div>
+  </div>
+</div>
+<script id="seed" type="application/json">__SEED__</script>
+<script>/*__ARCHIFY_BUNDLE__*/</script>
+<script>
+const SRC = '<!doctype html>\n' + document.documentElement.outerHTML;
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const TONE_LABEL = {frontend:'Xanh nhạt',backend:'Xanh dương',security:'Vàng (quyết định)',database:'Xanh lá',cloud:'Tím',messagebus:'Hồng',external:'Xám'};
+const SIDES = ['top', 'bottom', 'left', 'right'];
+const ACCENT = '#2563eb';
+
+let S = JSON.parse($('seed').textContent);
+let sel = null, mode = 'edit', connectMode = false, connectFrom = null;
+let hist = [], fut = [], seq = 1;
+let R = null, lastHtml = '', view = null;      // R: layout report of the page now shown; view: {doc, svg, rep}
+
+function norm(){
+  S.lanes ||= []; S.steps ||= []; S.edges ||= [];
+  let r = 0;
+  for (const s of S.steps){ r = s.row ?? r + 1; s.row = r; s.shape ||= 'step'; s.type ||= s.shape === 'decision' ? 'security' : 'backend'; }
+  S.steps.forEach((s) => { const m = /^s(\d+)$/.exec(s.id); if (m) seq = Math.max(seq, +m[1] + 1); });
+}
+function norm2(){ // rows 1..n in order; a fractional row (inserted copy) slots in between
+  const rows = [...new Set(S.steps.map((s) => s.row))].sort((a, b) => a - b);
+  const m = new Map(rows.map((r, i) => [r, i + 1])); S.steps.forEach((s) => { s.row = m.get(s.row); });
+}
+norm(); norm2();
+const snap = () => JSON.stringify(S);
+const say = (t, bad) => { const m = $('msg'); m.textContent = t; m.className = 'hint' + (bad ? ' err' : ''); };
+const nid = () => { let id; do id = 's' + (seq++); while (S.steps.some((s) => s.id === id)); return id; };
+const laneIdx = (id) => S.lanes.findIndex((l) => l.id === id);
+
+// ---------- diagram out / render ----------
+function clean(o){ const c = { ...o }; for (const k of Object.keys(c)) if (c[k] === '' || c[k] == null) delete c[k]; return c; }
+function out(){
+  const o = { ...S, schema_version: 1, diagram_type: 'swimlane' };
+  o.meta = { ...(S.meta || {}) }; if (!o.meta.title) o.meta.title = 'Quy trình';
+  o.steps = [...S.steps].sort((a, b) => a.row - b.row || laneIdx(a.lane) - laneIdx(b.lane)).map((s) => { const c = clean(s); if (!c.label) c.label = 'Bước'; if (c.shape === 'step') delete c.shape; return c; });
+  o.edges = S.edges.map(clean);
+  o.lanes = S.lanes.map((l) => { const c = clean(l); if (!c.label) c.label = 'Làn'; return c; });
+  return o;
+}
+function render(){ // returns an error text, or '' when the real archify renderer drew it
+  try {
+    const o = ArchifyBrowser.buildPage(out());
+    R = o.report; lastHtml = o.html; view = null;
+    $('pv').srcdoc = o.html;
+    return '';
+  } catch (e) { return ArchifyBrowser.diagnosticsOf(e).join(' | '); }
+}
+// Apply a change; an archify render failure rolls it back so the picture and the data never disagree.
+function mutate(...attempts){
+  const before = snap();
+  for (const fn of attempts){
+    S = JSON.parse(before); fn(); norm2();
+    const err = render();
+    if (!err){ hist.push(before); if (hist.length > 100) hist.shift(); fut = []; panel(); buttons(); return true; }
+    var last = err;
+  }
+  S = JSON.parse(before); norm(); render(); panel(); say('Đã hoàn tác: archify không vẽ được bố cục này (' + last + ')', true);
+  return false;
+}
+function undo(){ if (!hist.length) return; fut.push(snap()); S = JSON.parse(hist.pop()); sel = null; render(); panel(); buttons(); }
+function redo(){ if (!fut.length) return; hist.push(snap()); S = JSON.parse(fut.pop()); sel = null; render(); panel(); buttons(); }
+function buttons(){
+  $('bUndo').disabled = !hist.length; $('bRedo').disabled = !fut.length;
+  $('bConn').classList.toggle('on', connectMode);
+  $('bMode').textContent = mode === 'edit' ? 'Đang: Chỉnh sửa' : 'Đang: Xem (như archify)';
+  $('bMode').classList.toggle('on', mode === 'view');
+}
+
+// ---------- geometry from the real renderer's report ----------
+const stepRep = (id) => R.steps.find((s) => s.id === id);
+const anchor = (s, side) => side === 'top' ? [s.x + s.width / 2, s.y] : side === 'bottom' ? [s.x + s.width / 2, s.y + s.height] : side === 'left' ? [s.x, s.y + s.height / 2] : [s.x + s.width, s.y + s.height / 2];
+const inRect = (x, y, r) => x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height;
+function distSeg(x, y, a, b){
+  const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy || 1;
+  const t = Math.max(0, Math.min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / l2));
+  return Math.hypot(x - (a[0] + t * dx), y - (a[1] + t * dy));
+}
+function sideAt(s, x, y){
+  const dx = (x - (s.x + s.width / 2)) / s.width, dy = (y - (s.y + s.height / 2)) / s.height;
+  return Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'bottom' : 'top');
+}
+function cellAt(x, y){
+  const L = R.lanes, laneW = L[0].width;
+  const lane = Math.min(Math.max(Math.floor((x - L[0].x) / laneW), 0), L.length - 1);
+  const rows = R.rows; let ri = rows.length;
+  for (let i = 0; i < rows.length; i++) if (y < rows[i].top + rows[i].height){ ri = i; break; }
+  return { lane, ri };
+}
+function hit(x, y, scale){
+  const k = 1 / scale;
+  for (const l of R.lanes.map((l, i) => ({ l, i }))){
+    const cx = l.l.x + l.l.width - 13, cy = R.top + 13;
+    if (Math.hypot(x - cx, y - cy) < 11 * k) return { t: 'lanedel', id: l.l.id };
+    if (Math.hypot(x - (l.l.x + l.l.width), y - (R.top + 26)) < 11 * k) return { t: 'laneadd', i: l.i };
+  }
+  if (sel?.kind === 'edge'){
+    const e = R.edges.find((q) => q.index === sel.index);
+    if (e){ const p0 = e.points[0], p1 = e.points[e.points.length - 1];
+      if (Math.hypot(x - p0[0], y - p0[1]) < 11 * k) return { t: 'ehandle', index: sel.index, end: 'from' };
+      if (Math.hypot(x - p1[0], y - p1[1]) < 11 * k) return { t: 'ehandle', index: sel.index, end: 'to' }; }
+  }
+  if (sel?.kind === 'step'){
+    const s = stepRep(sel.id);
+    if (s) for (const sd of SIDES){ const [hx, hy] = anchor(s, sd); if (Math.hypot(x - hx, y - hy) < 11 * k) return { t: 'handle', id: s.id, side: sd }; }
+  }
+  for (const s of R.steps) if (inRect(x, y, s)) return { t: 'step', id: s.id };
+  for (const d of R.descriptions) if (inRect(x, y, d)) return { t: 'desc', id: d.id };
+  if (y >= R.top && y <= R.headerBottom){
+    const l = R.lanes.find((q) => x >= q.x && x < q.x + q.width); if (l) return { t: 'lhead', id: l.id };
+  }
+  for (const e of R.edges) for (let i = 0; i < e.points.length - 1; i++) if (distSeg(x, y, e.points[i], e.points[i + 1]) < 7 * k) return { t: 'edge', index: e.index };
+  return null;
+}
+
+// ---------- overlay inside the archify page ----------
+const SVGNS = 'http://www.w3.org/2000/svg';
+function ov(){ return view?.svg.querySelector('#ed-ov'); }
+function mk(tag, attrs){ const e = view.doc.createElementNS(SVGNS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; }
+function drawOverlay(){
+  if (!view) return;
+  view.svg.querySelector('#ed-ov')?.remove();
+  if (mode !== 'edit') return;
+  const g = mk('g', { id: 'ed-ov', 'font-family': 'system-ui,sans-serif' }); view.svg.appendChild(g);
+  const circle = (cx, cy, r, fill, stroke) => g.appendChild(mk('circle', { cx, cy, r, fill, stroke, 'stroke-width': 2 }));
+  const txt = (x, y, t, size = 13) => { const e = mk('text', { x, y, 'text-anchor': 'middle', 'font-size': size, 'font-weight': 700, fill: '#1d2430', 'pointer-events': 'none' }); e.textContent = t; g.appendChild(e); };
+  R.lanes.forEach((l, i) => {
+    circle(l.x + l.width - 13, R.top + 13, 9, '#fff', '#667085'); txt(l.x + l.width - 13, R.top + 18, '×');
+    circle(l.x + l.width, R.top + 26, 9, '#fff', '#667085'); txt(l.x + l.width, R.top + 31, '+');
+  });
+  if (sel?.kind === 'lane'){ const l = R.lanes.find((q) => q.id === sel.id); if (l) g.appendChild(mk('rect', { x: l.x, y: R.top, width: l.width, height: R.bodyBottom - R.top, fill: 'none', stroke: ACCENT, 'stroke-width': 3 })); }
+  if (sel?.kind === 'step'){
+    const s = stepRep(sel.id);
+    if (s){ g.appendChild(mk('rect', { x: s.x - 4, y: s.y - 4, width: s.width + 8, height: s.height + 8, rx: 10, fill: 'none', stroke: ACCENT, 'stroke-width': 2.5, 'stroke-dasharray': '6 3' }));
+      for (const sd of SIDES){ const [hx, hy] = anchor(s, sd); circle(hx, hy, 6, ACCENT, '#fff'); } }
+    const d = R.descriptions.find((q) => q.id === sel.id);
+    if (d) g.appendChild(mk('rect', { x: d.x - 4, y: d.y - 2, width: d.width + 8, height: d.height + 4, rx: 4, fill: ACCENT, 'fill-opacity': .08, stroke: ACCENT, 'stroke-width': 1.5 }));
+  }
+  if (sel?.kind === 'edge'){
+    const e = R.edges.find((q) => q.index === sel.index);
+    if (e){ g.appendChild(mk('polyline', { points: e.points.map((p) => p.join(',')).join(' '), fill: 'none', stroke: ACCENT, 'stroke-width': 5, 'stroke-opacity': .45, 'stroke-linejoin': 'round' }));
+      for (const p of [e.points[0], e.points[e.points.length - 1]]) circle(p[0], p[1], 7, '#fff', ACCENT); }
+  }
+}
+function ghost(markup){ const g = ov(); if (!g) return; g.querySelector('#ed-ghost')?.remove(); const w = mk('g', { id: 'ed-ghost', 'pointer-events': 'none' }); w.innerHTML = markup; g.appendChild(w); }
+const ghostSvg = (inner) => ghost(inner); // innerHTML on an SVG <g> parses in the SVG namespace
+
+// ---------- interaction (attached to the archify page after each load) ----------
+let drag = null, lastDown = { key: '', t: 0 }, swallow = false;
+function attach(doc, rep){
+  const svg = doc.querySelector('svg[data-swimlane-ui]'); if (!svg) return;
+  view = { doc, svg, rep }; R = rep; drawOverlay();
+  const win = doc.defaultView;
+  const scale = () => svg.getScreenCTM().a || 1;
+  const pt = (ev) => { const p = new win.DOMPoint(ev.clientX, ev.clientY).matrixTransform(svg.getScreenCTM().inverse()); return [p.x, p.y]; };
+  const stop = (ev) => { ev.preventDefault(); ev.stopImmediatePropagation(); };
+  for (const type of ['mousedown', 'click', 'dblclick']) doc.addEventListener(type, (ev) => { if (mode === 'edit' && swallow) stop(ev); if (type === 'click') swallow = false; }, true);
+  doc.addEventListener('keydown', onKey, true);
+
+  doc.addEventListener('pointerdown', (ev) => {
+    if (mode !== 'edit' || ev.button !== 0) return;
+    const [x, y] = pt(ev), h = hit(x, y, scale());
+    swallow = !!h;
+    if (!h){ if (sel){ sel = null; connectFrom = null; drawOverlay(); panel(); } return; }
+    stop(ev);
+    const key = h.t + ':' + (h.id ?? h.index ?? h.i), now = Date.now();
+    if (['step', 'desc', 'edge', 'lhead'].includes(h.t) && lastDown.key === key && now - lastDown.t < 450 && !connectMode){ lastDown = { key: '', t: 0 }; onDouble(h); return; }
+    lastDown = { key, t: now };
+    if (h.t === 'lanedel'){ delLane(h.id); return; }
+    if (h.t === 'laneadd'){ addLane(h.i); return; }
+    svg.setPointerCapture?.(ev.pointerId);
+    if (h.t === 'ehandle'){ drag = { kind: 'reend', index: h.index, end: h.end }; return; }
+    if (h.t === 'handle'){ drag = { kind: 'connect', from: h.id, side: h.side }; return; }
+    if (h.t === 'lhead'){ sel = { kind: 'lane', id: h.id }; drag = { kind: 'lane', id: h.id, x0: x, moved: false }; drawOverlay(); panel(); return; }
+    if (h.t === 'edge'){ sel = { kind: 'edge', index: h.index }; drawOverlay(); panel(); return; }
+    if (h.t === 'desc'){ sel = { kind: 'step', id: h.id }; drawOverlay(); panel(); return; }
+    if (h.t === 'step'){
+      if (connectMode){
+        if (!connectFrom){ connectFrom = h.id; sel = { kind: 'step', id: h.id }; say('Bấm bước đích'); drawOverlay(); panel(); }
+        else { const a = connectFrom; connectFrom = null; addEdge(a, h.id); }
+        return;
+      }
+      sel = { kind: 'step', id: h.id }; drag = { kind: 'move', id: h.id, x0: x, y0: y, moved: false }; drawOverlay(); panel();
+    }
+  }, true);
+
+  doc.addEventListener('pointermove', (ev) => {
+    if (!drag || mode !== 'edit') return;
+    const [x, y] = pt(ev);
+    if (drag.kind === 'move'){
+      if (!drag.moved && Math.hypot(x - drag.x0, y - drag.y0) < 6) return;
+      drag.moved = true;
+      const c = cellAt(x, y), l = R.lanes[c.lane], rows = R.rows;
+      const top = c.ri < rows.length ? rows[c.ri].top : R.bodyBottom, hgt = c.ri < rows.length ? rows[c.ri].height : 90;
+      ghostSvg(`<rect x="${l.x}" y="${top}" width="${l.width}" height="${hgt}" fill="${ACCENT}" fill-opacity=".15" stroke="${ACCENT}" stroke-dasharray="6 4"/>`
+        + (ev.shiftKey && c.ri < rows.length ? `<line x1="${R.lanes[0].x}" x2="${R.lanesRight}" y1="${top}" y2="${top}" stroke="${ACCENT}" stroke-width="4"/>` : ''));
+    } else if (drag.kind === 'lane'){
+      if (!drag.moved && Math.abs(x - drag.x0) < 6) return;
+      drag.moved = true;
+      const c = cellAt(x, R.headerBottom + 1), l = R.lanes[c.lane];
+      ghostSvg(`<rect x="${l.x}" y="${R.top}" width="${l.width}" height="${R.bodyBottom - R.top}" fill="${ACCENT}" fill-opacity=".15" stroke="${ACCENT}" stroke-dasharray="6 4"/>`);
+    } else if (drag.kind === 'reend'){
+      const e = R.edges.find((q) => q.index === drag.index), fixed = drag.end === 'from' ? e.points[e.points.length - 1] : e.points[0];
+      ghostSvg(`<line x1="${fixed[0]}" y1="${fixed[1]}" x2="${x}" y2="${y}" stroke="${ACCENT}" stroke-width="3" stroke-dasharray="6 4"/>`);
+    } else {
+      const [ax, ay] = anchor(stepRep(drag.from), drag.side);
+      ghostSvg(`<line x1="${ax}" y1="${ay}" x2="${x}" y2="${y}" stroke="${ACCENT}" stroke-width="3" stroke-dasharray="6 4"/>`);
+    }
+  }, true);
+
+  doc.addEventListener('pointerup', (ev) => {
+    if (!drag || mode !== 'edit') return;
+    const d = drag; drag = null; stop(ev);
+    ov()?.querySelector('#ed-ghost')?.remove();
+    const [x, y] = pt(ev), h = hit(x, y, scale());
+    const target = h && (h.t === 'step' || h.t === 'handle') ? stepRep(h.id) : R.steps.find((s) => inRect(x, y, s));
+    if (d.kind === 'connect'){
+      if (target && target.id !== d.from) addEdge(d.from, target.id, d.side, sideAt(target, x, y)); else say('Thả lên một bước khác để nối');
+    } else if (d.kind === 'reend'){
+      const e = S.edges[d.index], other = d.end === 'from' ? e.to : e.from;
+      if (!target){ say('Thả lên một bước để đổi chỗ nối'); return; }
+      if (target.id === other){ say('Không nối một bước với chính nó', true); return; }
+      if (S.edges.some((q, k) => k !== d.index && q.from === (d.end === 'from' ? target.id : e.from) && q.to === (d.end === 'to' ? target.id : e.to))){ say('Mũi tên này đã có', true); return; }
+      const sd = sideAt(target, x, y);
+      mutate((() => { const f = () => { const q = S.edges[d.index]; q[d.end] = target.id; q[d.end + 'Side'] = sd; }; return f; })(),
+        () => { const q = S.edges[d.index]; q[d.end] = target.id; delete q.fromSide; delete q.toSide; });
+    } else if (d.kind === 'lane'){
+      if (!d.moved) return;
+      const to = cellAt(x, R.headerBottom + 1).lane, from = laneIdx(d.id);
+      if (from !== to) mutate(() => { const [l] = S.lanes.splice(from, 1); S.lanes.splice(to, 0, l); });
+    } else if (d.kind === 'move' && d.moved){
+      const c = cellAt(x, y), lane = R.lanes[c.lane].id, rows = R.rows;
+      mutate(() => {
+        const s = S.steps.find((q) => q.id === d.id); let row;
+        if (ev.shiftKey && c.ri < rows.length){ row = rows[c.ri].row; S.steps.forEach((q) => { if (q.row >= row) q.row += 1; }); }
+        else if (c.ri >= rows.length) row = Math.max(...rows.map((r) => r.row), 0) + 1;
+        else row = rows[c.ri].row;
+        const other = S.steps.find((q) => q !== s && q.lane === lane && q.row === row);
+        if (other){ other.lane = s.lane; other.row = s.row; }
+        s.lane = lane; s.row = row;
+      });
+    }
+  }, true);
+}
+$('pv').addEventListener('load', () => { if (R) attach($('pv').contentDocument, R); });
+function onKey(ev){
+  if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '') || mode !== 'edit') return;
+  if (ev.key === 'Delete' || ev.key === 'Backspace'){ ev.preventDefault(); delSel(); }
+  else if ((ev.ctrlKey || ev.metaKey) && ev.key === 'z'){ ev.preventDefault(); ev.shiftKey ? redo() : undo(); }
+  else if ((ev.ctrlKey || ev.metaKey) && ev.key === 'y'){ ev.preventDefault(); redo(); }
+  else if (ev.key === 'Escape'){ connectMode = false; connectFrom = null; sel = null; drawOverlay(); panel(); buttons(); }
+}
+document.addEventListener('keydown', onKey);
+
+// ---------- model operations ----------
+function onDouble(h){
+  if (h.t === 'desc'){ sel = { kind: 'step', id: h.id }; drawOverlay(); panel(); editDesc(h.id); }
+  else if (h.t === 'step'){ const s = S.steps.find((q) => q.id === h.id); const v = prompt('Nhãn bước:', s.label); if (v) mutate(() => { S.steps.find((q) => q.id === h.id).label = v; }); }
+  else if (h.t === 'edge'){ const e = S.edges[h.index]; const v = prompt('Nhãn mũi tên (để trống = không nhãn):', e.label || ''); if (v != null) mutate(() => { const q = S.edges[h.index]; if (v) q.label = v; else delete q.label; }); }
+  else if (h.t === 'lhead'){ const l = S.lanes.find((q) => q.id === h.id); const v = prompt('Tên làn:', l.label); if (v) mutate(() => { S.lanes.find((q) => q.id === h.id).label = v; }); }
+}
+function editDesc(id){
+  const s = S.steps.find((q) => q.id === id), d = R.descriptions.find((q) => q.id === id); if (!s || !d || !view) return;
+  document.querySelector('.descbox')?.remove();
+  const m = view.svg.getScreenCTM(), fr = $('pv').getBoundingClientRect(), st = $('stage').getBoundingClientRect();
+  const ta = document.createElement('textarea'); ta.className = 'descbox'; ta.value = s.description || '';
+  Object.assign(ta.style, { left: fr.left - st.left + m.e + d.x * m.a - 6 + 'px', top: fr.top - st.top + m.f + d.y * m.d - 6 + 'px', width: Math.max(d.width * m.a + 12, 260) + 'px', height: Math.max(d.height * m.d + 60, 110) + 'px' });
+  $('stage').appendChild(ta); ta.focus();
+  let done = false;
+  const fin = (ok) => { if (done) return; done = true; const v = ta.value; ta.remove(); if (ok && v !== (s.description || '')) mutate(() => { S.steps.find((q) => q.id === id).description = v; }); };
+  ta.onblur = () => fin(true);
+  ta.onkeydown = (e) => { if (e.key === 'Escape'){ e.preventDefault(); fin(false); } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)){ e.preventDefault(); fin(true); } };
+}
+function addStep(shape){
+  if (!S.lanes.length){ say('Thêm làn trước', true); return; }
+  const from = sel?.kind === 'step' ? S.steps.find((s) => s.id === sel.id) : null;
+  const n = { id: nid(), shape, type: shape === 'decision' ? 'security' : 'backend', label: shape === 'decision' ? 'Điều kiện?' : 'Bước mới', description: '' };
+  if (mutate(() => {
+    n.lane = from?.lane || (sel?.kind === 'lane' ? sel.id : S.lanes[0].id);
+    if (from){ n.row = from.row + 1; S.steps.forEach((s) => { if (s.row >= n.row) s.row += 1; }); } else n.row = Math.max(0, ...S.steps.map((s) => s.row)) + 1;
+    S.steps.push({ ...n });
+    if (from && $('autoLink').checked) S.edges.push({ from: from.id, to: n.id });
+  })){ sel = { kind: 'step', id: n.id }; drawOverlay(); panel(); const f = $('side').querySelector('[data-f=label]'); f?.focus(); f?.select(); }
+}
+function addLane(after){
+  const name = prompt('Tên làn mới (nhóm đối tượng):', 'Bộ phận mới'); if (!name) return;
+  let id = 'l' + (S.lanes.length + 1); while (S.lanes.some((l) => l.id === id)) id += 'x';
+  if (mutate(() => { S.lanes.splice(typeof after === 'number' ? after + 1 : S.lanes.length, 0, { id, label: name }); })){ sel = { kind: 'lane', id }; drawOverlay(); panel(); }
+}
+function delLane(id){
+  const n = S.steps.filter((s) => s.lane === id).length;
+  if (n && !confirm('Làn này có ' + n + ' bước. Xóa làn sẽ xóa luôn các bước và mũi tên của chúng. Tiếp tục?')) return;
+  if (S.lanes.length === 1){ say('Phải còn ít nhất một làn', true); return; }
+  sel = null;
+  mutate(() => { const gone = new Set(S.steps.filter((s) => s.lane === id).map((s) => s.id)); S.steps = S.steps.filter((s) => s.lane !== id); S.edges = S.edges.filter((e) => !gone.has(e.from) && !gone.has(e.to)); S.lanes = S.lanes.filter((l) => l.id !== id); });
+  drawOverlay(); panel();
+}
+function delSel(){
+  if (!sel) return;
+  const k = sel; sel = null;
+  if (k.kind === 'step') mutate(() => { S.steps = S.steps.filter((s) => s.id !== k.id); S.edges = S.edges.filter((e) => e.from !== k.id && e.to !== k.id); });
+  else if (k.kind === 'edge') mutate(() => { S.edges.splice(k.index, 1); });
+  else if (k.kind === 'lane'){ sel = k; delLane(k.id); return; }
+  drawOverlay(); panel();
+}
+function addEdge(a, b, fromSide, toSide){
+  if (a === b) return;
+  if (S.edges.some((e) => e.from === a && e.to === b)){ say('Mũi tên này đã có', true); return; }
+  const idx = S.edges.length;
+  const plain = () => { S.edges.push({ from: a, to: b }); };
+  const sided = () => { const e = { from: a, to: b }; if (fromSide) e.fromSide = fromSide; if (toSide) e.toSide = toSide; S.edges.push(e); };
+  if (mutate(sided, plain)){ sel = { kind: 'edge', index: idx }; drawOverlay(); panel(); }
+}
+function renumber(){
+  const order = [...S.steps].sort((a, b) => a.row - b.row || laneIdx(a.lane) - laneIdx(b.lane));
+  mutate(() => { order.forEach((o, i) => { const s = S.steps.find((q) => q.id === o.id); s.label = (i + 1) + '. ' + String(s.label).replace(/^\s*\d+[A-Za-z]?\.?\s*/, ''); }); });
+}
+
+// ---------- side panel ----------
+const EDGE_VARIANTS = [['', 'Liền'], ['dashed', 'Đứt nét'], ['emphasis', 'Nhấn mạnh'], ['security', 'Cảnh báo']];
+function bindFields(p, target, after){
+  p.querySelectorAll('[data-f]').forEach((el) => {
+    el.addEventListener('change', () => {
+      const f = el.dataset.f, v = el.value, t0 = target();
+      if (!t0 || String(t0[f] ?? '') === v) return;
+      mutate(() => { const t = target(); if (v === '') delete t[f]; else t[f] = v; });
+      if (after) after();
+    });
+  });
+}
+function panel(){
+  const p = $('side');
+  const hint = `<div class="hint"><b>Kéo</b> bước sang ô khác (giữ <b>Shift</b> để chèn hàng mới). <b>Kéo chấm xanh</b> quanh bước để nối mũi tên; chọn mũi tên rồi kéo hai đầu để đổi chỗ nối. <b>Kéo tên làn</b> để đổi vị trí. <b>Nhấp đúp</b> vào bước, mô tả, làn hay mũi tên để sửa nhanh. <b>Delete</b> xóa phần đang chọn. Nút "Đang: Chỉnh sửa" chuyển sang chế độ xem của archify.</div>`;
+  if (sel?.kind === 'step'){
+    const s = S.steps.find((x) => x.id === sel.id); if (!s){ sel = null; return panel(); }
+    p.innerHTML = `<h3>Bước ${esc(s.id)}</h3>
+      <label>Nhãn (ví dụ "3. Kiểm tra tồn")</label><input data-f="label" value="${esc(s.label)}">
+      <label>Mô tả chi tiết</label><textarea data-f="description">${esc(s.description || '')}</textarea>
+      <label>Hệ thống / chứng từ</label><input data-f="system" value="${esc(s.system || '')}">
+      <label>Ghi chú nhỏ phía trên (tag)</label><input data-f="tag" value="${esc(s.tag || '')}">
+      <label>Hình dạng</label><select data-f="shape"><option value="step"${s.shape === 'step' ? ' selected' : ''}>Bước (chữ nhật)</option><option value="decision"${s.shape === 'decision' ? ' selected' : ''}>Quyết định (hình thoi)</option></select>
+      <label>Màu</label><select data-f="type">${Object.keys(TONE_LABEL).map((t) => `<option value="${t}"${s.type === t ? ' selected' : ''}>${TONE_LABEL[t]}</option>`).join('')}</select>
+      <label>Làn</label><select data-f="lane">${S.lanes.map((l) => `<option value="${esc(l.id)}"${s.lane === l.id ? ' selected' : ''}>${esc(l.label)}</option>`).join('')}</select>
+      <div class="row"><button id="pDup">Nhân đôi</button><button id="pDel">Xóa bước</button></div>${hint}`;
+    bindFields(p, () => S.steps.find((x) => x.id === sel.id), () => { drawOverlay(); });
+    $('pDel').onclick = delSel;
+    $('pDup').onclick = () => { const n = { ...s, id: nid(), row: s.row + 0.5, label: s.label + ' (bản sao)' }; if (mutate(() => { S.steps.push(n); })){ sel = { kind: 'step', id: n.id }; drawOverlay(); panel(); } };
+  } else if (sel?.kind === 'edge'){
+    const e = S.edges[sel.index]; if (!e){ sel = null; return panel(); }
+    p.innerHTML = `<h3>Mũi tên ${esc(e.from)} → ${esc(e.to)}</h3>
+      <label>Nhãn (ví dụ "Có", "Không")</label><input data-f="label" value="${esc(e.label || '')}">
+      <label>Kiểu nét</label><select data-f="variant">${EDGE_VARIANTS.map(([v, t]) => `<option value="${v}"${(e.variant || '') === v ? ' selected' : ''}>${t}</option>`).join('')}</select>
+      <div class="row"><button id="pRev">Đảo chiều</button><button id="pAuto">Tự chọn hướng đi</button><button id="pDel">Xóa mũi tên</button></div>${hint}`;
+    bindFields(p, () => S.edges[sel.index], () => drawOverlay());
+    $('pDel').onclick = delSel;
+    $('pRev').onclick = () => mutate(() => { const q = S.edges[sel.index]; [q.from, q.to] = [q.to, q.from]; [q.fromSide, q.toSide] = [q.toSide, q.fromSide]; for (const k of ['fromSide', 'toSide']) if (!q[k]) delete q[k]; });
+    $('pAuto').onclick = () => mutate(() => { const q = S.edges[sel.index]; delete q.fromSide; delete q.toSide; });
+  } else if (sel?.kind === 'lane'){
+    const i = laneIdx(sel.id), l = S.lanes[i]; if (!l){ sel = null; return panel(); }
+    p.innerHTML = `<h3>Làn "${esc(l.label)}"</h3>
+      <label>Tên làn</label><input data-f="label" value="${esc(l.label)}">
+      <label>Kiểu</label><select data-f="variant"><option value=""${!l.variant || l.variant === 'normal' ? ' selected' : ''}>Thường</option><option value="exception"${l.variant === 'exception' ? ' selected' : ''}>Ngoại lệ (viền đứt)</option></select>
+      <div class="row"><button id="lL">← Sang trái</button><button id="lR">Sang phải →</button><button id="pDel">Xóa làn</button></div>${hint}`;
+    bindFields(p, () => S.lanes.find((q) => q.id === sel.id), () => drawOverlay());
+    const mv = (d) => { const j = i + d; if (j < 0 || j >= S.lanes.length) return; mutate(() => { [S.lanes[i], S.lanes[j]] = [S.lanes[j], S.lanes[i]]; }); drawOverlay(); };
+    $('lL').onclick = () => mv(-1); $('lR').onclick = () => mv(1); $('pDel').onclick = delSel;
+  } else {
+    p.innerHTML = `<h3>${esc(S.meta?.title || 'Quy trình')}</h3>
+      <label>Tiêu đề quy trình</label><input id="mTitle" value="${esc(S.meta?.title || '')}">
+      <label>Tiêu đề cột mô tả</label><input id="mDesc" value="${esc(S.layout?.descriptionTitle || '')}" placeholder="Mô tả chi tiết">
+      <div class="hint">Chọn một bước, mũi tên hoặc tên làn để sửa chi tiết ở đây.</div>${hint}`;
+    $('mTitle').onchange = (ev) => mutate(() => { (S.meta ||= {}).title = ev.target.value || 'Quy trình'; });
+    $('mDesc').onchange = (ev) => mutate(() => { (S.layout ||= {}); if (ev.target.value) S.layout.descriptionTitle = ev.target.value; else delete S.layout.descriptionTitle; });
+  }
+}
+
+// ---------- toolbar / export ----------
+$('bMode').onclick = () => { mode = mode === 'edit' ? 'view' : 'edit'; document.querySelector('.descbox')?.remove(); drawOverlay(); buttons(); say(mode === 'view' ? 'Chế độ xem: dùng các công cụ của archify (thu phóng, chọn bước, tìm...)' : ''); };
+$('bAdd').onclick = () => addStep('step');
+$('bDec').onclick = () => addStep('decision');
+$('bLane').onclick = () => addLane();
+$('bConn').onclick = () => { connectMode = !connectMode; connectFrom = null; say(connectMode ? 'Bấm bước nguồn rồi bước đích (Esc để thoát)' : ''); buttons(); };
+$('bDel').onclick = delSel; $('bUndo').onclick = undo; $('bRedo').onclick = redo; $('bNum').onclick = renumber;
+function save(name, text, type){ const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); }
+const fname = () => ((S.meta?.title || 'quy-trinh').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'quy-trinh');
+$('bJson').onclick = () => { save(fname() + '.swimlane.json', JSON.stringify(out(), null, 2), 'application/json'); say('Đã xuất JSON, dùng được với archify finalize swimlane'); };
+$('bPage').onclick = () => { save(fname() + '.html', lastHtml, 'text/html'); say('Đã tải trang archify'); };
+$('bHtml').onclick = () => {
+  const json = JSON.stringify(out()).replace(/</g, '\\u003c');
+  save(fname() + '.editor.html', SRC.replace(/(<script id="seed" type="application\/json">)[\s\S]*?(<\/script>)/, (_, a, b) => a + json + b), 'text/html');
+  say('Đã lưu file làm việc, mở lại để sửa tiếp');
+};
+$('bLoad').onclick = () => $('fLoad').click();
+$('fLoad').onchange = async (ev) => {
+  const f = ev.target.files[0]; if (!f) return;
+  try {
+    const j = JSON.parse(await f.text()); if (j.diagram_type !== 'swimlane') throw new Error('Không phải file swimlane');
+    const before = snap(); S = j; norm(); norm2(); const err = render();
+    if (err){ S = JSON.parse(before); render(); throw new Error(err); }
+    hist.push(before); fut = []; sel = null; panel(); buttons(); say('Đã mở ' + f.name);
+  } catch (e) { say('Không mở được: ' + e.message, true); }
+};
+
+window.__editor = { get S(){ return S; }, get R(){ return R; }, out, mutate, addStep, addEdge };
+const err0 = render(); if (err0) say(err0, true);
+panel(); buttons();
+</script>
+</body>
+</html>

@@ -12,7 +12,7 @@ const shared = /^(geometry|spatial-grid|svg-path-(?:analysis|checker)|layout-rul
 const viewer = /^(viewer-|reader-|desktop-|semantic-|finder|focus|intent-|crossover-|animation|export-|motion-|offline-|i18n|relationship-|share-|reach-|presentation)/;
 export function selectAffectedTests(owners, changed, available) {
   if (!Array.isArray(owners) || !Array.isArray(changed)) throw new Error('CI test selection must contain arrays');
-  const allowed = new Set(['renderer', 'viewer', 'authoring', 'schema', 'site', 'artifact', 'delta', 'readme', 'architecture', 'workflow', 'sequence', 'dataflow', 'lifecycle', 'erd', 'class', 'tree', 'timeline', 'waterfall']);
+  const allowed = new Set(['renderer', 'viewer', 'authoring', 'schema', 'site', 'artifact', 'delta', 'readme', 'architecture', 'workflow', 'sequence', 'dataflow', 'lifecycle', 'erd', 'class', 'tree', 'timeline', 'waterfall', 'swimlane']);
   if (owners.some(owner => !allowed.has(owner))) throw new Error('Unknown CI test owner');
   if (changed.some(name => !/^test\/[^/]+\.test\.mjs$/.test(name))) throw new Error('Invalid changed test path');
   return available.filter(file => {

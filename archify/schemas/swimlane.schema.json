@@ -1,0 +1,272 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tt-a1i/archify/schemas/swimlane.schema.json",
+  "title": "Archify Vertical Swimlane Flowchart",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "diagram_type",
+    "meta",
+    "lanes",
+    "steps",
+    "edges"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "diagram_type": {
+      "const": "swimlane"
+    },
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "output"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "locale": {
+          "$ref": "common.schema.json#/$defs/locale"
+        },
+        "translations": {
+          "$ref": "common.schema.json#/$defs/translations"
+        },
+        "subtitle": {
+          "type": "string"
+        },
+        "output": {
+          "$ref": "common.schema.json#/$defs/portableOutputPath"
+        },
+        "animation": {
+          "enum": [
+            "trace",
+            "none"
+          ]
+        },
+        "visual_preset": {
+          "enum": [
+            "classic",
+            "signal-flow",
+            "blueprint",
+            "editorial"
+          ]
+        },
+        "quality_profile": {
+          "enum": [
+            "standard",
+            "showcase"
+          ]
+        },
+        "repository": {
+          "$ref": "common.schema.json#/$defs/repository"
+        },
+        "views": {
+          "$ref": "common.schema.json#/$defs/guidedViews"
+        },
+        "legend": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "$ref": "common.schema.json#/$defs/legendMode"
+            },
+            "entries": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "frontend": {
+                  "$ref": "common.schema.json#/$defs/legendEntry"
+                },
+                "backend": {
+                  "$ref": "common.schema.json#/$defs/legendEntry"
+                },
+                "database": {
+                  "$ref": "common.schema.json#/$defs/legendEntry"
+                },
+                "cloud": {
+                  "$ref": "common.schema.json#/$defs/legendEntry"
+                },
+                "security": {
+                  "$ref": "common.schema.json#/$defs/legendEntry"
+                },
+                "messagebus": {
+                  "$ref": "common.schema.json#/$defs/legendEntry"
+                },
+                "external": {
+                  "$ref": "common.schema.json#/$defs/legendEntry"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "lanes": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "label"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "common.schema.json#/$defs/id"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1
+          },
+          "variant": {
+            "enum": [
+              "normal",
+              "exception"
+            ]
+          }
+        }
+      }
+    },
+    "layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "laneWidth": {
+          "type": "number",
+          "minimum": 110,
+          "maximum": 220,
+          "description": "Width of each lane column in px."
+        },
+        "descriptionWidth": {
+          "type": "number",
+          "minimum": 240,
+          "maximum": 640,
+          "description": "Width of the description column in px."
+        },
+        "descriptionTitle": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Heading of the description column."
+        }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "lane",
+          "label"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "common.schema.json#/$defs/id"
+          },
+          "lane": {
+            "$ref": "common.schema.json#/$defs/id"
+          },
+          "row": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Row from the top. Defaults to one below the previous step; set the same row on two steps to place them side by side."
+          },
+          "type": {
+            "$ref": "common.schema.json#/$defs/componentType"
+          },
+          "shape": {
+            "enum": [
+              "step",
+              "decision"
+            ]
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1
+          },
+          "tag": {
+            "type": "string"
+          },
+          "number": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Step number shown in the description column; defaults to the step label prefix."
+          },
+          "description": {
+            "type": "string"
+          },
+          "system": {
+            "type": "string"
+          },
+          "sources": {
+            "$ref": "common.schema.json#/$defs/sourceReferences"
+          }
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "from",
+          "to"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "common.schema.json#/$defs/id"
+          },
+          "from": {
+            "$ref": "common.schema.json#/$defs/id"
+          },
+          "to": {
+            "$ref": "common.schema.json#/$defs/id"
+          },
+          "label": {
+            "type": "string"
+          },
+          "variant": {
+            "$ref": "common.schema.json#/$defs/variant"
+          },
+          "route": {
+            "enum": [
+              "auto",
+              "side-first",
+              "down-first"
+            ]
+          },
+          "fromSide": {
+            "enum": [
+              "left",
+              "right",
+              "top",
+              "bottom"
+            ]
+          },
+          "toSide": {
+            "enum": [
+              "left",
+              "right",
+              "top",
+              "bottom"
+            ]
+          }
+        }
+      }
+    },
+    "cards": {
+      "$ref": "common.schema.json#/$defs/cards"
+    }
+  }
+}

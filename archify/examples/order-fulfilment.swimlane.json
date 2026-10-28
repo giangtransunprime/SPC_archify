@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "diagram_type": "swimlane",
+  "meta": {
+    "title": "Order Fulfilment Swimlane",
+    "output": "examples/swimlane-order-fulfilment-rendered.html",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    { "id": "customer", "label": "Customer" },
+    { "id": "sales", "label": "Sales team" },
+    { "id": "warehouse", "label": "Warehouse" },
+    { "id": "finance", "label": "Finance" },
+    { "id": "issues", "label": "Returns", "variant": "exception" }
+  ],
+  "steps": [
+    { "id": "order", "lane": "customer", "type": "external", "label": "1. Place order", "description": "The customer places an order on the web shop or by message.", "system": "Web shop, chat" },
+    { "id": "check", "lane": "sales", "shape": "decision", "label": "2. In stock?", "description": "Sales checks the available stock for every line of the order.", "system": "Stock sheet" },
+    { "id": "confirm", "lane": "sales", "type": "frontend", "label": "3. Confirm order", "tag": "customer notified", "description": "Sales confirms the order and sends the pick instruction to the warehouse.", "system": "Order form" },
+    { "id": "pick", "lane": "warehouse", "type": "backend", "label": "4. Pick and ship", "description": "The warehouse picks, packs and ships the goods, then records the stock movement.", "system": "Delivery note" },
+    { "id": "invoice", "lane": "finance", "type": "database", "label": "5. Issue invoice", "description": "Finance issues the invoice once delivery is confirmed and posts it to the ledger.", "system": "Invoice, ledger" },
+    { "id": "return", "lane": "issues", "type": "security", "label": "6. Handle return", "description": "A returned or damaged item is booked back into stock and the invoice is adjusted.", "system": "Return slip" }
+  ],
+  "edges": [
+    { "from": "order", "to": "check", "label": "order", "variant": "emphasis" },
+    { "from": "check", "to": "confirm", "label": "yes", "variant": "default" },
+    { "from": "confirm", "to": "pick", "label": "pick list", "variant": "emphasis" },
+    { "from": "pick", "to": "invoice", "label": "delivered", "variant": "default" },
+    { "from": "pick", "to": "return", "label": "returned", "variant": "security" }
+  ],
+  "cards": [
+    { "dot": "emerald", "title": "How to read it", "items": ["Each column is one role and time runs top to bottom", "The description beside a row explains the step in that row"] }
+  ]
+}
