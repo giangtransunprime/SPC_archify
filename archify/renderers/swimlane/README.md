@@ -62,8 +62,10 @@ other routes.
 - add steps and decision diamonds below the selected step, optionally auto-linked;
 - drag the blue handle under a step onto another step to draw an arrow, or use the
   link mode button; double-click edits labels;
-- edit description, system, tag, shape, colour and lane in the side panel, add,
-  rename, reorder and delete lanes;
+- select an arrow and drag either end onto a step (or a side of it) to re-route it;
+- drag a lane header to reorder lanes, use the + and x on a header to add or delete a lane;
+- double-click a description to edit it in place; the side panel edits description,
+  system, tag, shape, colour and lane;
 - undo/redo, renumber labels, export JSON, SVG, or a working copy of the editor
   that opens with the current process.
 

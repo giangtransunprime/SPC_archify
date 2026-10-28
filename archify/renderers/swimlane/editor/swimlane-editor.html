@@ -18,7 +18,12 @@ button:hover{border-color:var(--accent)}
 button.on{background:var(--accent);border-color:var(--accent);color:#fff}
 button:disabled{opacity:.4;cursor:default}
 .main{display:grid;grid-template-columns:1fr 290px;min-height:0}
-.canvas{overflow:auto;padding:12px;min-height:0}
+.canvas{overflow:auto;padding:12px;min-height:0;position:relative}
+.descbox{position:absolute;z-index:5;font:12px/15px system-ui,sans-serif;padding:3px 4px;border:2px solid var(--accent);border-radius:6px;background:var(--panel);color:var(--text);resize:none}
+.ctl{cursor:pointer}.ctl circle{fill:var(--panel);stroke:var(--muted)}.ctl:hover circle{stroke:var(--accent);fill:var(--accent)}.ctl text{fill:var(--text);font-size:13px;font-weight:700;pointer-events:none}.ctl:hover text{fill:#fff}
+.ehandle{fill:#fff;stroke:var(--accent);stroke-width:3;cursor:grab}
+[data-desc]{cursor:text}[data-desc]:hover .dtxt{fill:var(--accent)}
+.lhead{cursor:grab}
 .side{border-left:1px solid var(--line);background:var(--panel);padding:12px;overflow:auto}
 .side h3{margin:0 0 8px;font-size:13px}
 .side label{display:block;margin:8px 0 3px;color:var(--muted);font-size:12px}
@@ -126,7 +131,7 @@ function compute(){
     descLines[it.ri].push({ id: it.s.id, head: it.s.label, ls });
   }
   rows.forEach((_, i) => {
-    const n = descLines[i].reduce((a, d) => a + (d.ls.length ? d.ls.length + 1 : 0), 0);
+    const n = descLines[i].reduce((a, d) => a + Math.max(d.ls.length, 1) + 1, 0);
     rowH[i] = Math.max(rowH[i], n * 15 + 16);
   });
   const rowTop = []; let y = G.top + G.hdr + 6;
@@ -182,11 +187,11 @@ function overlap(p, used){
   }
   return n;
 }
-function route(a, b, used){
+function route(a, b, used, fixFrom, fixTo){
   const c = [];
   const gutters = []; for (let i = 0; i <= S.lanes.length; i++) gutters.push(G.m + i * G.laneW);
   const sides = ['top', 'bottom', 'left', 'right'];
-  for (const fs of sides) for (const ts of sides){
+  for (const fs of fixFrom ? [fixFrom] : sides) for (const ts of fixTo ? [fixTo] : sides){
     const [fx, fy] = anchor(a, fs), [tx, ty] = anchor(b, ts);
     const out = (s, [x, y], d = 16) => s === 'top' ? [x, y - d] : s === 'bottom' ? [x, y + d] : s === 'left' ? [x - d, y] : [x + d, y];
     const fo = out(fs, [fx, fy]), to = out(ts, [tx, ty]);
@@ -217,7 +222,7 @@ function route(a, b, used){
     if (cost < bestCost){ best = p; bestCost = cost; }
   }
   if (best){ for (let i = 0; i < best.length - 1; i++) used.push([best[i], best[i + 1]]); return { pts: best, ok: true }; }
-  return { pts: [anchor(a, 'bottom'), anchor(b, 'top')], ok: false };
+  return { pts: [anchor(a, fixFrom || 'bottom'), anchor(b, fixTo || 'top')], ok: false };
 }
 function pathD(pts, r = 8){
   let d = `M${pts[0][0]} ${pts[0][1]}`;
@@ -243,20 +248,33 @@ function draw(){
     const x = G.m + i * G.laneW, ex = l.variant === 'exception';
     const on = sel?.kind === 'lane' && sel.id === l.id;
     h += `<g data-lane="${esc(l.id)}"><rect x="${x}" y="${G.top}" width="${G.laneW}" height="${bodyBottom - G.top + 40}" fill="${i % 2 ? 'var(--lane2)' : 'var(--lane)'}" stroke="${on ? 'var(--accent)' : 'var(--line)'}" stroke-width="${on ? 2.5 : 1}" ${ex ? 'stroke-dasharray="6 4"' : ''}/>`
-      + `<rect x="${x}" y="${G.top}" width="${G.laneW}" height="${G.hdr}" fill="var(--line)" opacity=".55"/>`
-      + `<text x="${x + G.laneW / 2}" y="${G.top + 25}" text-anchor="middle" font-size="13" font-weight="700" fill="var(--text)">${esc(l.label)}</text></g>`;
+      + `<rect class="lhead" data-lhead="${esc(l.id)}" x="${x}" y="${G.top}" width="${G.laneW}" height="${G.hdr}" fill="var(--line)" opacity=".55"><title>Kéo để đổi vị trí làn</title></rect>`
+      + `<text x="${x + G.laneW / 2}" y="${G.top + 25}" text-anchor="middle" font-size="13" font-weight="700" fill="var(--text)" pointer-events="none">${esc(l.label)}</text>`
+      + `</g>`;
+  });
+  S.lanes.forEach((l, i) => {
+    const x = G.m + i * G.laneW;
+    h += `<g class="ctl" data-lanedel="${esc(l.id)}"><title>Xóa làn</title><circle cx="${x + G.laneW - 13}" cy="${G.top + 13}" r="9"/><text x="${x + G.laneW - 13}" y="${G.top + 18}" text-anchor="middle">×</text></g>`
+      + `<g class="ctl" data-laneadd="${i}"><title>Thêm làn bên phải</title><circle cx="${x + G.laneW}" cy="${G.top + G.hdr / 2 + 6}" r="9"/><text x="${x + G.laneW}" y="${G.top + G.hdr / 2 + 11}" text-anchor="middle">+</text></g>`;
   });
   ctx.rowTop.forEach((t, i) => { h += `<line x1="${G.m}" x2="${width - G.m}" y1="${t + ctx.rowH[i]}" y2="${t + ctx.rowH[i]}" stroke="var(--grid)" stroke-dasharray="2 4"/>`; });
   // descriptions
   const dx = G.m + lanesW + G.descGap;
   h += `<text x="${dx}" y="${G.top + 25}" font-size="13" font-weight="700" fill="var(--text)">${esc(S.layout?.descriptionTitle || 'Mô tả chi tiết')}</text>`;
+  ctx.descPos = new Map();
   ctx.descLines.forEach((list, ri) => {
     let y = ctx.rowTop[ri] + 18;
     for (const d of list){
-      if (!d.ls.length) continue;
-      h += `<text x="${dx}" y="${y}" font-size="12" font-weight="700" fill="var(--text)">${esc((d.head || '').match(/^\s*\d+[A-Za-z]?\.?/)?.[0] || '')}</text>`;
-      d.ls.forEach((ln, k) => { h += `<text x="${dx + 26}" y="${y + k * 15}" font-size="12" fill="var(--muted)">${esc(ln)}</text>`; });
-      y += (d.ls.length + 1) * 15;
+      const num = (d.head || '').match(/^\s*\d+[A-Za-z]?\.?/)?.[0] || '';
+      const n = Math.max(d.ls.length, 1);
+      ctx.descPos.set(d.id, { x: dx + 22, y: y - 13, h: n * 15 + 6 });
+      const on = sel?.kind === 'step' && sel.id === d.id;
+      h += `<g data-desc="${esc(d.id)}"><rect x="${dx - 4}" y="${y - 13}" width="${G.descW}" height="${n * 15 + 6}" fill="${on ? 'var(--accent)' : 'transparent'}" opacity="${on ? .1 : 1}" rx="4"/>`
+        + `<text x="${dx}" y="${y}" font-size="12" font-weight="700" fill="var(--text)">${esc(num)}</text>`;
+      if (d.ls.length) d.ls.forEach((ln, k) => { h += `<text class="dtxt" x="${dx + 26}" y="${y + k * 15}" font-size="12" fill="var(--muted)">${esc(ln)}</text>`; });
+      else h += `<text class="dtxt" x="${dx + 26}" y="${y}" font-size="12" font-style="italic" fill="var(--muted)" opacity=".6">nhấp đúp để thêm mô tả…</text>`;
+      h += `</g>`;
+      y += (n + 1) * 15 + 2;
     }
   });
   // edges
@@ -264,7 +282,7 @@ function draw(){
   ctx.routes = S.edges.map((e, i) => {
     const a = ctx.byId.get(e.from), b = ctx.byId.get(e.to);
     if (!a || !b) return null;
-    const r = route(a, b, used); r.edge = e; r.i = i; return r;
+    const r = route(a, b, used, e.fromSide, e.toSide); r.edge = e; r.i = i; return r;
   });
   const lbl = [];
   for (const r of ctx.routes){
@@ -307,9 +325,14 @@ function draw(){
   }
   if (sel?.kind === 'step'){
     const it = ctx.byId.get(sel.id);
-    if (it) h += `<circle class="handle" data-handle="${esc(it.s.id)}" cx="${it.x + it.w / 2}" cy="${it.y + it.h + (it.dec ? 0 : 0) + 0}" r="6"><title>Kéo sang bước khác để nối mũi tên</title></circle>`;
+    if (it) for (const sd of ['top', 'bottom', 'left', 'right']){ const [hx, hy] = anchor(it, sd); h += `<circle class="handle" data-handle="${esc(it.s.id)}" data-side="${sd}" cx="${hx}" cy="${hy}" r="6"><title>Kéo sang bước khác để nối mũi tên</title></circle>`; }
+  } else if (sel?.kind === 'edge'){
+    const r = ctx.routes[sel.index];
+    if (r){ const e0 = r.pts[0], e1 = r.pts[r.pts.length - 1];
+      h += `<circle class="ehandle" data-ehandle="${sel.index}" data-end="from" cx="${e0[0]}" cy="${e0[1]}" r="7"><title>Kéo để đổi điểm xuất phát hoặc bước nguồn</title></circle>`
+        + `<circle class="ehandle" data-ehandle="${sel.index}" data-end="to" cx="${e1[0]}" cy="${e1[1]}" r="7"><title>Kéo để đổi điểm đến hoặc bước đích</title></circle>`; }
   }
-  h += `<g id="overlay"></g></svg>`;
+  h += `<g id="overlay" pointer-events="none"></g></svg>`;
   $('canvas').innerHTML = h;
   panel();
   $('bConn').classList.toggle('on', mode === 'connect');
@@ -319,7 +342,7 @@ function draw(){
 // ---------- side panel ----------
 function panel(){
   const p = $('side');
-  const hint = `<div class="hint"><b>Kéo</b> bước sang ô khác (giữ <b>Shift</b> để chèn hàng mới). <b>Kéo chấm xanh</b> dưới bước để nối mũi tên. <b>Nhấp đúp</b> để đổi tên nhanh. <b>Delete</b> xóa phần đang chọn.</div>`;
+  const hint = `<div class="hint"><b>Kéo</b> bước sang ô khác (giữ <b>Shift</b> để chèn hàng mới). <b>Kéo chấm xanh</b> quanh bước để nối mũi tên; chọn mũi tên rồi kéo hai đầu để đổi chỗ nối. <b>Kéo tên làn</b> để đổi vị trí làn. <b>Nhấp đúp</b> vào bước, mô tả, làn hay mũi tên để sửa nhanh. <b>Delete</b> xóa phần đang chọn.</div>`;
   if (sel?.kind === 'step'){
     const s = S.steps.find((x) => x.id === sel.id); if (!s) return;
     p.innerHTML = `<h3>Bước ${esc(s.id)}</h3>
@@ -345,13 +368,14 @@ function panel(){
     p.innerHTML = `<h3>Mũi tên ${esc(e.from)} → ${esc(e.to)}</h3>
       <label>Nhãn (ví dụ "Có", "Không")</label><input data-f="label" value="${esc(e.label || '')}">
       <label>Kiểu nét</label><select data-f="variant"><option value=""${!e.variant ? ' selected' : ''}>Liền</option><option value="exception"${e.variant === 'exception' ? ' selected' : ''}>Đứt nét (ngoại lệ)</option></select>
-      <div class="row"><button id="pRev">Đảo chiều</button><button id="pDel">Xóa mũi tên</button></div>${hint}`;
+      <div class="row"><button id="pRev">Đảo chiều</button><button id="pAuto">Tự chọn hướng đi</button><button id="pDel">Xóa mũi tên</button></div>${hint}`;
     p.querySelectorAll('[data-f]').forEach((el) => {
       el.addEventListener('input', () => { if (el.value) e[el.dataset.f] = el.value; else delete e[el.dataset.f]; draw2(); });
       el.addEventListener('change', () => { commit(); draw(); });
     });
     $('pDel').onclick = delSel;
-    $('pRev').onclick = () => { [e.from, e.to] = [e.to, e.from]; commit(); draw(); };
+    $('pRev').onclick = () => { [e.from, e.to] = [e.to, e.from]; [e.fromSide, e.toSide] = [e.toSide, e.fromSide]; for (const k of ['fromSide', 'toSide']) if (!e[k]) delete e[k]; commit(); draw(); };
+    $('pAuto').onclick = () => { delete e.fromSide; delete e.toSide; commit(); draw(); };
   } else if (sel?.kind === 'lane'){
     const i = S.lanes.findIndex((l) => l.id === sel.id), l = S.lanes[i]; if (!l) return;
     p.innerHTML = `<h3>Làn "${esc(l.label)}"</h3>
@@ -399,10 +423,33 @@ function addStep(shape){
   sel = { kind: 'step', id: n.id }; commit(); draw();
   const f = $('side').querySelector('[data-f=label]'); f?.focus(); f?.select();
 }
-function addLane(){
+function addLane(after){
   const name = prompt('Tên làn mới (nhóm đối tượng):', 'Bộ phận mới'); if (!name) return;
   let id = 'l' + (S.lanes.length + 1); while (S.lanes.some((l) => l.id === id)) id += 'x';
-  S.lanes.push({ id, label: name }); sel = { kind: 'lane', id }; commit(); draw();
+  const at = typeof after === 'number' ? after + 1 : S.lanes.length;
+  S.lanes.splice(at, 0, { id, label: name }); sel = { kind: 'lane', id }; commit(); draw();
+}
+function delLane(id){
+  const n = S.steps.filter((s) => s.lane === id).length;
+  if (n && !confirm('Làn này có ' + n + ' bước. Xóa làn sẽ xóa luôn các bước và mũi tên của chúng. Tiếp tục?')) return;
+  const gone = new Set(S.steps.filter((s) => s.lane === id).map((s) => s.id));
+  S.steps = S.steps.filter((s) => s.lane !== id); S.edges = S.edges.filter((e) => !gone.has(e.from) && !gone.has(e.to));
+  S.lanes = S.lanes.filter((l) => l.id !== id); norm2(); sel = null; commit(); draw();
+}
+function sideAt(it, x, y){
+  const dx = (x - (it.x + it.w / 2)) / it.w, dy = (y - (it.y + it.h / 2)) / it.h;
+  return Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'bottom' : 'top');
+}
+function editDesc(id){
+  const s = S.steps.find((q) => q.id === id), pos = ctx.descPos.get(id); if (!s || !pos) return;
+  document.querySelector('.descbox')?.remove();
+  const ta = document.createElement('textarea'); ta.className = 'descbox'; ta.value = s.description || '';
+  Object.assign(ta.style, { left: 12 + pos.x - 4 + 'px', top: 12 + pos.y + 'px', width: G.descW - 34 + 'px', height: Math.max(pos.h + 40, 90) + 'px' });
+  $('canvas').appendChild(ta); ta.focus();
+  let done = false;
+  const fin = (ok) => { if (done) return; done = true; if (ok && ta.value !== (s.description || '')){ s.description = ta.value; commit(); } ta.remove(); draw(); };
+  ta.onblur = () => fin(true);
+  ta.onkeydown = (e) => { if (e.key === 'Escape'){ e.preventDefault(); fin(false); } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)){ e.preventDefault(); fin(true); } };
 }
 function delSel(){
   if (!sel) return;
@@ -411,10 +458,11 @@ function delSel(){
   else if (sel.kind === 'lane'){ if (S.steps.some((s) => s.lane === sel.id)){ say('Làn còn bước, hãy chuyển hoặc xóa các bước trước', true); return; } S.lanes = S.lanes.filter((l) => l.id !== sel.id); }
   sel = null; commit(); draw();
 }
-function addEdge(a, b){
+function addEdge(a, b, fromSide, toSide){
   if (a === b) return;
   if (S.edges.some((e) => e.from === a && e.to === b)){ say('Mũi tên này đã có', true); return; }
-  S.edges.push({ from: a, to: b }); sel = { kind: 'edge', index: S.edges.length - 1 }; commit(); draw();
+  const e = { from: a, to: b }; if (fromSide) e.fromSide = fromSide; if (toSide) e.toSide = toSide;
+  S.edges.push(e); sel = { kind: 'edge', index: S.edges.length - 1 }; commit(); draw();
 }
 function renumber(){
   const order = [...S.steps].sort((a, b) => a.row - b.row || S.lanes.findIndex((l) => l.id === a.lane) - S.lanes.findIndex((l) => l.id === b.lane));
@@ -426,11 +474,23 @@ function renumber(){
 let drag = null;
 const svgPt = (ev) => { const r = $('svg').getBoundingClientRect(); return [ev.clientX - r.left, ev.clientY - r.top]; };
 $('canvas').addEventListener('pointerdown', (ev) => {
+  const dk = dblKey(ev.target), now = Date.now();
+  if (dk && lastDown.key === dk.join(':') && now - lastDown.t < 450 && mode !== 'connect'){ lastDown = { key: '', t: 0 }; drag = null; ev.preventDefault(); onDouble(dk[0], dk[1]); return; }
+  lastDown = { key: dk ? dk.join(':') : '', t: now };
+  const ldel = ev.target.closest('[data-lanedel]'), ladd = ev.target.closest('[data-laneadd]');
+  if (ldel){ delLane(ldel.dataset.lanedel); return; }
+  if (ladd){ addLane(+ladd.dataset.laneadd); return; }
+  const eh = ev.target.closest('[data-ehandle]');
+  if (eh){ drag = { kind: 'reend', index: +eh.dataset.ehandle, end: eh.dataset.end }; $('canvas').setPointerCapture(ev.pointerId); ev.preventDefault(); return; }
+  const lh = ev.target.closest('[data-lhead]');
+  if (lh){ const [x] = svgPt(ev); sel = { kind: 'lane', id: lh.dataset.lhead }; drag = { kind: 'lane', id: lh.dataset.lhead, x0: x, moved: false }; $('canvas').setPointerCapture(ev.pointerId); draw(); return; }
   const hd = ev.target.closest('[data-handle]');
   const st = ev.target.closest('[data-step]');
+  const dsc = ev.target.closest('[data-desc]');
+  if (dsc && !st){ sel = { kind: 'step', id: dsc.dataset.desc }; draw(); return; }
   const ed = ev.target.closest('[data-edge]');
   const ln = ev.target.closest('[data-lane]');
-  if (hd){ drag = { kind: 'connect', from: hd.dataset.handle }; $('canvas').setPointerCapture(ev.pointerId); ev.preventDefault(); return; }
+  if (hd){ drag = { kind: 'connect', from: hd.dataset.handle, side: hd.dataset.side }; $('canvas').setPointerCapture(ev.pointerId); ev.preventDefault(); return; }
   if (st){
     const id = st.dataset.step;
     if (mode === 'connect'){
@@ -457,8 +517,16 @@ $('canvas').addEventListener('pointermove', (ev) => {
     ov.innerHTML = `<rect x="${gx}" y="${gy}" width="${it.w}" height="${it.h}" rx="8" fill="var(--accent)" opacity=".18" stroke="var(--accent)" stroke-dasharray="5 3"/>`
       + (ev.shiftKey ? `<line x1="${G.m}" x2="${G.m + ctx.lanesW}" y1="${cell.insertY}" y2="${cell.insertY}" stroke="var(--accent)" stroke-width="3"/>` : '')
       + `<rect x="${x - it.w / 2}" y="${y - it.h / 2}" width="${it.w}" height="${it.h}" rx="8" fill="var(--accent)" opacity=".35"/>`;
+  } else if (drag.kind === 'lane'){
+    if (!drag.moved && Math.abs(x - drag.x0) < 5) return;
+    drag.moved = true;
+    const to = Math.min(Math.max(Math.floor((x - G.m) / G.laneW), 0), S.lanes.length - 1);
+    ov.innerHTML = `<rect x="${G.m + to * G.laneW}" y="${G.top}" width="${G.laneW}" height="${ctx.bodyBottom - G.top + 40}" fill="var(--accent)" opacity=".15" stroke="var(--accent)" stroke-dasharray="5 3"/>`;
+  } else if (drag.kind === 'reend'){
+    const r = ctx.routes[drag.index], fixed = drag.end === 'from' ? r.pts[r.pts.length - 1] : r.pts[0];
+    ov.innerHTML = `<line x1="${fixed[0]}" y1="${fixed[1]}" x2="${x}" y2="${y}" stroke="var(--accent)" stroke-width="2" stroke-dasharray="5 3"/>`;
   } else {
-    const a = ctx.byId.get(drag.from), [ax, ay] = anchor(a, 'bottom');
+    const a = ctx.byId.get(drag.from), [ax, ay] = anchor(a, drag.side || 'bottom');
     ov.innerHTML = `<line x1="${ax}" y1="${ay}" x2="${x}" y2="${y}" stroke="var(--accent)" stroke-width="2" stroke-dasharray="5 3" marker-end="url(#ar)"/>`;
   }
 });
@@ -475,8 +543,26 @@ $('canvas').addEventListener('pointerup', (ev) => {
   if (d.kind === 'connect'){
     const tgt = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('[data-step]');
     $('overlay').innerHTML = '';
-    if (tgt && tgt.dataset.step !== d.from) addEdge(d.from, tgt.dataset.step); else say('Thả lên một bước khác để nối');
+    if (tgt && tgt.dataset.step !== d.from) addEdge(d.from, tgt.dataset.step, d.side, sideAt(ctx.byId.get(tgt.dataset.step), x, y)); else say('Thả lên một bước khác để nối');
     return;
+  }
+  if (d.kind === 'reend'){
+    $('overlay').innerHTML = '';
+    const tgt = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('[data-step]');
+    const e = S.edges[d.index];
+    if (!tgt){ say('Thả lên một bước để đổi chỗ nối'); draw(); return; }
+    const id = tgt.dataset.step, other = d.end === 'from' ? e.to : e.from;
+    if (id === other){ say('Không nối một bước với chính nó', true); draw(); return; }
+    if (S.edges.some((q, k) => k !== d.index && q.from === (d.end === 'from' ? id : e.from) && q.to === (d.end === 'to' ? id : e.to))){ say('Mũi tên này đã có', true); draw(); return; }
+    e[d.end] = id; e[d.end + 'Side'] = sideAt(ctx.byId.get(id), x, y);
+    commit(); draw(); return;
+  }
+  if (d.kind === 'lane'){
+    $('overlay').innerHTML = '';
+    if (!d.moved){ draw(); return; }
+    const from = S.lanes.findIndex((l) => l.id === d.id), to = Math.min(Math.max(Math.floor((x - G.m) / G.laneW), 0), S.lanes.length - 1);
+    if (from !== to){ const [l] = S.lanes.splice(from, 1); S.lanes.splice(to, 0, l); commit(); }
+    draw(); return;
   }
   if (!d.moved) return;
   drag = d; const cell = cellAt(x, y); drag = null;
@@ -490,12 +576,24 @@ $('canvas').addEventListener('pointerup', (ev) => {
   s.lane = lane; s.row = row; norm2(); commit(); draw();
   if (other) say('Đã đổi chỗ với bước "' + other.label + '"');
 });
-$('canvas').addEventListener('dblclick', (ev) => {
-  const st = ev.target.closest('[data-step]'), ln = ev.target.closest('[data-lane]'), ed = ev.target.closest('[data-edge]');
-  if (st){ const s = S.steps.find((q) => q.id === st.dataset.step); const v = prompt('Nhãn bước:', s.label); if (v != null){ s.label = v; commit(); draw(); } }
-  else if (ed){ const e = S.edges[+ed.dataset.edge]; const v = prompt('Nhãn mũi tên (để trống = không nhãn):', e.label || ''); if (v != null){ if (v) e.label = v; else delete e.label; commit(); draw(); } }
-  else if (ln){ const l = S.lanes.find((q) => q.id === ln.dataset.lane); const v = prompt('Tên làn:', l.label); if (v){ l.label = v; commit(); draw(); } }
-});
+// Own double-click detection: the first pointerdown redraws the SVG, and browsers then drop the native dblclick.
+let lastDown = { key: '', t: 0 };
+function onDouble(kind, id){
+  if (kind === 'desc'){ sel = { kind: 'step', id }; draw(); editDesc(id); }
+  else if (kind === 'step'){ const s = S.steps.find((q) => q.id === id); const v = prompt('Nhãn bước:', s.label); if (v != null){ s.label = v; commit(); draw(); } }
+  else if (kind === 'edge'){ const e = S.edges[+id]; const v = prompt('Nhãn mũi tên (để trống = không nhãn):', e.label || ''); if (v != null){ if (v) e.label = v; else delete e.label; commit(); draw(); } }
+  else if (kind === 'lane'){ const l = S.lanes.find((q) => q.id === id); const v = prompt('Tên làn:', l.label); if (v){ l.label = v; commit(); draw(); } }
+}
+function dblKey(t){
+  const g = (s) => t.closest(s);
+  if (g('[data-handle]') || g('[data-ehandle]') || g('[data-lanedel]') || g('[data-laneadd]')) return null;
+  let x;
+  if ((x = g('[data-step]'))) return ['step', x.dataset.step];
+  if ((x = g('[data-desc]'))) return ['desc', x.dataset.desc];
+  if ((x = g('[data-edge]'))) return ['edge', x.dataset.edge];
+  if ((x = g('[data-lhead]'))) return ['lane', x.dataset.lhead];
+  return null;
+}
 document.addEventListener('keydown', (ev) => {
   if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '')) return;
   if (ev.key === 'Delete' || ev.key === 'Backspace'){ ev.preventDefault(); delSel(); }
@@ -507,7 +605,7 @@ document.addEventListener('keydown', (ev) => {
 // ---------- toolbar / export ----------
 $('bAdd').onclick = () => addStep('step');
 $('bDec').onclick = () => addStep('decision');
-$('bLane').onclick = addLane;
+$('bLane').onclick = () => addLane();
 $('bConn').onclick = () => { mode = mode ? null : 'connect'; connectFrom = null; say(mode ? 'Bấm bước nguồn rồi bước đích (Esc để thoát)' : ''); draw(); };
 $('bDel').onclick = delSel; $('bUndo').onclick = undo; $('bRedo').onclick = redo; $('bNum').onclick = renumber;
 function out(){
