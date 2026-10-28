@@ -55,19 +55,6 @@ other routes.
 
 ## Visual editor
 
-`editor/swimlane-editor.html` is a single-file, offline editor for the same JSON
-(`__SEED__` in the file is replaced with the diagram). Open it in a browser to:
-
-- drag a step to another lane or row (Shift inserts a new row; a occupied cell swaps);
-- add steps and decision diamonds below the selected step, optionally auto-linked;
-- drag the blue handle under a step onto another step to draw an arrow, or use the
-  link mode button; double-click edits labels;
-- select an arrow and drag either end onto a step (or a side of it) to re-route it;
-- drag a lane header to reorder lanes, use the + and x on a header to add or delete a lane;
-- double-click a description to edit it in place; the side panel edits description,
-  system, tag, shape, colour and lane;
-- undo/redo, renumber labels, export JSON, SVG, or a working copy of the editor
-  that opens with the current process.
-
-Export the JSON and run `archify finalize swimlane` for the checked showcase HTML.
-The editor's own routing is a lightweight preview and may stack parallel lines.
+`tools/swimlane-editor/` (outside the skill package) holds an offline browser editor for this JSON.
+It bundles this renderer and the Archify viewer template, so the preview is the real Archify page
+(`renderSwimlane` in `swimlane-core.mjs` is shared by the CLI and the editor). See its README.
